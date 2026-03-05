@@ -8,6 +8,8 @@
 
 4: merge results from process 2 and 3, and filter invalid grid cell
 
+build_sbdart_input/: transform surface albode and meteorological profiles from CERES and ERA5 to SBDART INPUT formation
+
 fig1~fig4: plot codes
 
 cal_yuan23_ac: reproduce cloud albedo in Yuan2023
