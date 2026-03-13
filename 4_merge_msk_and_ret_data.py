@@ -9,11 +9,12 @@ plt.rcParams['figure.dpi'] = 300
 plt.rcParams['figure.figsize'] = (4.5, 6.5)
 plt.rcParams['axes.unicode_minus'] = False
 
-# Fields to exclude from processing (keep aod_mod08)
-FIELDS_TO_REMOVE = {
+# Different fields to exclude for different directories
+FIELDS_TO_REMOVE_DIR1 = {'cot_ceres', 'clr_fra'}
+FIELDS_TO_REMOVE_DIR2 = {
     'ret_re_mod', 'solar_zenith', 'sensor_zenith',
-    'cot_ceres', 'ret_fov_fra', 'ret_albedo_uncert',
-    'ret_uncorrected_albedo', 'ret_fra', 'unr_fra', 'clr_fra'
+    'ret_fov_fra', 'ret_albedo_uncert',
+    'ret_uncorrected_albedo', 'ret_fra', 'unr_fra'
 }
 
 def calculate_rmse(x, y):
@@ -28,8 +29,14 @@ def calculate_rmse(x, y):
     rmse = np.sqrt(np.mean((x_clean - y_clean) ** 2))
     return round(rmse, 1)
 
-def load_and_clean_csv(file_path):
-    """Load CSV file, remove specified fields (keep aod_mod08), return dict with lat+lon+date as key"""
+def load_and_clean_csv(file_path, fields_to_remove):
+    """
+    Load CSV file, remove specified fields, return dict with lat+lon+date as key
+    
+    Args:
+        file_path: Path to CSV file
+        fields_to_remove: Set of fields to remove from the CSV
+    """
     csv_dict = {}
     if not os.path.exists(file_path):
         print(f"Warning: File not found - {file_path}")
@@ -37,7 +44,7 @@ def load_and_clean_csv(file_path):
     
     with open(file_path, 'r', newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f)
-        cleaned_headers = [h for h in reader.fieldnames if h not in FIELDS_TO_REMOVE]
+        cleaned_headers = [h for h in reader.fieldnames if h not in fields_to_remove]
         
         for row in reader:
             lat = row.get('lat', '').strip()
@@ -63,8 +70,9 @@ def process_ocean_data(ocean, input_dir1, input_dir2, output_csv_dir):
     file2 = os.path.join(input_dir2, f"{ocean}.csv")
     output_csv = os.path.join(output_csv_dir, f"{ocean}.csv")
     
-    dict1 = load_and_clean_csv(file1)
-    dict2 = load_and_clean_csv(file2)
+    # Load each file with its specific field removal rules
+    dict1 = load_and_clean_csv(file1, FIELDS_TO_REMOVE_DIR1)
+    dict2 = load_and_clean_csv(file2, FIELDS_TO_REMOVE_DIR2)
     
     if not dict1 or not dict2:
         print(f"Warning: No valid data in {ocean}, skip processing")
@@ -240,7 +248,7 @@ if __name__ == "__main__":
     OCEANS = ['NPO', 'NAO', 'TAO', 'TIO', 'TPO', 'SPO', 'SAO', 'SIO']
     
     # Path configuration
-    INPUT_DIR1 = "/home/chenyiqi/251028_albedo_cot/SSFproduct/ocean_data0118/"
+    INPUT_DIR1 = "/home/chenyiqi/251028_albedo_cot/SSFproduct/ocean_data0311/"
     INPUT_DIR2 = "/home/chenyiqi/251028_albedo_cot/uniform_fov_product/ocean_data1227/"
     OUTPUT_CSV_DIR = "/home/chenyiqi/251028_albedo_cot/processed_data/merged_msk_and_ret_csv/"
     OUTPUT_PLOT_DIR = "/home/chenyiqi/251028_albedo_cot/figs/"
