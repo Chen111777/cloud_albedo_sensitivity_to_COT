@@ -86,8 +86,6 @@ if __name__ == "__main__":
     # land edge
     ax.add_feature(cfeature.LAND, facecolor='white', edgecolor='black', linewidth=0.5, zorder=2)
     ax.set_title('$\mathbf{(a)}$', fontsize=10, loc='left')
-    
-    # 核心修改：设置显示范围 经度全球(-180,180)，纬度-60到60
     ax.set_extent([-180, 180, -60, 60], crs=ccrs.PlateCarree())
     
     # Gridlines
@@ -97,7 +95,7 @@ if __name__ == "__main__":
     gl.xlabel_style = {'size': 8}
     gl.ylabel_style = {'size': 8}
 
-    # Ensure figs directory exists and save figure
+    # save figure
     out_dir = 'figs'
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, 'division_8oceans.png')
