@@ -292,14 +292,7 @@ def create_main_plot():
     
     uncor_lnb2_df = load_uncor_data(UNCOR_LNB2_FILE)
 
-    # ── 创建图形 ────────────────────────────────────────────────────────────────
     fig = plt.figure(figsize=(16, 20), dpi=100)
-    
-    # 简化版布局：三个主行，每行三个子图 + colorbar
-    # left   width   gap   cbar_width
-    # 0.06   0.24    0.08  0.015   →  第一列
-    # 0.38   0.24    0.08  0.015   →  第二列
-    # 0.70   0.24          0.015   →  第三列（k1没有中间图）
 
     # Row 1: k2
     ax_k_a = fig.add_axes([0.06, 0.69, 0.24, 0.24])   # (a) uncor k2
@@ -313,7 +306,7 @@ def create_main_plot():
     im_k_c = plot_heatmap(ax_k_c, szacorr_k2_df, r'$\mathbf{(c)}$ $k_{\mathrm{ret}}$, Daytime Mean', 
                           vmin=K_VMIN, vmax=K_VMAX)
 
-    cbar_k_ax = fig.add_axes([0.97, 0.69, 0.012, 0.24])   # k colorbar (右边统一位置)
+    cbar_k_ax = fig.add_axes([0.97, 0.69, 0.012, 0.24])   # k colorbar
     cbar_k = fig.colorbar(im_k_a, cax=cbar_k_ax, orientation='vertical')
     cbar_k.set_label('$k$', fontsize=SIZE_PARAMS['xylabel'])
     cbar_k.set_ticks(np.arange(0.35, 0.91, 0.1))
