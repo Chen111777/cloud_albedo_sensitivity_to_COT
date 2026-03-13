@@ -9,9 +9,8 @@ import glob
 import re
 import sys
 
-# ======================== 函数1：读取 MOD08 变量 ========================
 def read_and_mask_mod_variable(hdf, var_name):
-    """读取 HDF 变量并处理缩放因子和填充值"""
+    """read HDF variable """
     sds = hdf.select(var_name)
     data = sds[:].astype(float)
     attrs = sds.attributes()
@@ -26,9 +25,8 @@ def read_and_mask_mod_variable(hdf, var_name):
         data = data * scale_factor
     return data
 
-# ======================== 函数2：处理单个 MOD08 文件 ========================
 def process_single_mod08_file(file_path, time_min, time_max, lat_min, lat_max):
-    """读取并处理单个 MOD08 文件"""
+    """read and process single MOD08 file"""
     file_name = os.path.basename(file_path)
     date_str = file_name.split('.A')[1].split('.')[0]
     file_date = datetime.strptime(date_str, '%Y%j').date()
@@ -69,7 +67,7 @@ def process_single_mod08_file(file_path, time_min, time_max, lat_min, lat_max):
     return df
 
 
-# ======================== 主程序 ========================
+# ======================== main ========================
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python script.py <year>")
@@ -78,7 +76,6 @@ if __name__ == "__main__":
     year = sys.argv[1]
     output_csv = f'/home/chenyiqi/251028_albedo_cot/SSFproduct/{year}.csv'
 
-    # ========== 基础配置 ==========
     time_min = np.datetime64(f'{year}-01-01')
     time_max = np.datetime64(f'{year}-12-31')
     lat_min, lat_max = -60, 60
@@ -105,9 +102,6 @@ if __name__ == "__main__":
     df_ls = pd.DataFrame({'lat': lat_repeated, 'lon': lon_repeated, 'time': time_repeated})
 
     # ========== CERES ==========
-    # pattern1 = f"/data/chenyiqi/251028_albedo_cot/CERES_L3SSF_2001to2023/CERES_SSF1deg-Day_Terra-MODIS_Ed4.1_Subset_{year}*-*.nc"
-    # pattern2 = f"/data/chenyiqi/251028_albedo_cot/CERES_L3SSF_2001to2023/CERES_SSF1deg-Day_Terra-MODIS_Ed4.1_Subset_{int(year)-1}*-*.nc"
-    # cer_files = list(set(glob.glob(pattern1) + glob.glob(pattern2)))
     cer_files = '/home/chenyiqi/251028_albedo_cot/CERES_L3SSF_2020/CERES_SSF1deg-Day_Terra-MODIS_Ed4.1_Subset_20200101-20201231.nc'
     ds = xr.open_mfdataset(cer_files, combine='nested', concat_dim='time')
     
@@ -124,6 +118,7 @@ if __name__ == "__main__":
     toa_solar  = ds['toa_solar_all_daily'].sel(time=time_mask, lat=latmask).values
     cld_fra = ds['cldarea_total_day_daily'].sel(time=time_mask, lat=latmask).values / 100
     cld_fra_liq = ds['cldarea_liq_total_day_daily'].sel(time=time_mask, lat=latmask).values / 100
+    clr_fra = (ds['toa_sw_num_obs_clr_daily'] / ds['toa_sw_num_obs_all_daily']).sel(time=time_mask, lat=latmask).values
     time_cer = time_cer[time_mask].astype('datetime64[D]')
 
     lon_grid, lat_grid = np.meshgrid(lon, lat)
@@ -133,7 +128,7 @@ if __name__ == "__main__":
 
     df_cer = pd.DataFrame({
         'lat': lat_flat, 'lon': lon_flat, 'time': pd.to_datetime(time_flat).date,
-        'cf_ceres': cld_fra.flatten(), 'cf_liq_ceres': cld_fra_liq.flatten(),
+        'cf_ceres': cld_fra.flatten(), 'cf_liq_ceres': cld_fra_liq.flatten(), 'clr_fra':clr_fra.flatten(),
         'sw_clr': toa_sw_clr.flatten(), 'sw_all': toa_sw_all.flatten(),
         'solar_incoming': toa_solar.flatten()
     })
@@ -143,19 +138,11 @@ if __name__ == "__main__":
     all_dfs = [process_single_mod08_file(f, time_min, time_max, lat_min, lat_max) for f in mod_files]
     df_mod = pd.concat([df for df in all_dfs if df is not None], ignore_index=True)
 
-    # # ====== From MOD06 =========
-    # file_paths = glob.glob(f"/home/chenyiqi/251028_albedo_cot/cf_product/cf_{year}*.csv")
-    # df_mod06 = pd.concat(
-    #     [pd.read_csv(file) 
-    #     for file in file_paths],
-    #     ignore_index=True)
-    # df_mod06['time'] = pd.to_datetime(df_mod06['time'], format='mixed').dt.date
     
-    # ========== 合并 ==========
-    # merged_df = pd.merge(df_ls, df_mod06, on=['time', 'lon', 'lat'], how='left')
+    # ========== merge ==========
     merged_df = pd.merge(df_ls, df_mod, on=['time', 'lon', 'lat'], how='left')
     merged_df = pd.merge(merged_df, df_cer, on=['time', 'lon', 'lat'], how='left')
 
-    # ========== 输出 ==========
+    # ========== save ==========
     merged_df.to_csv(output_csv, index=False)
-    print(f"已保存：{output_csv}")
+    print(f"saved to: {output_csv}")
