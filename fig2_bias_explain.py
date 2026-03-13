@@ -17,8 +17,8 @@ oceans = ['NPO', 'NAO','TPO',  'TAO', 'TIO', 'SPO', 'SAO', 'SIO']
 sza_list = [55, 15]
 cot_range = np.exp(np.linspace(np.log(3), 3, 15))
 
-METHODS = ['sbdart', 'quadrature']  # Removed eddington
-LINECOLOR = ['steelblue', 'orange', 'coral', 'red']  # Removed purple for eddington
+METHODS = ['sbdart', 'quadrature']
+LINECOLOR = ['steelblue', 'orange', 'coral', 'red']
 LINESTYLE = ['-', '-', '--', ':']
 
 def cot_to_x(cot):
@@ -138,14 +138,15 @@ def process_all_oceans(n_bins=2):
     x2 = cot_to_x(cot_ref)
     for ocean in oceans:
         file_path = f"{BASE_PATH}/processed_data/merged_msk_and_ret_csv/{ocean}.csv"
-        cols = ['ret_albedo','ret_cot_cer','ret_cotstd_cer','time','lat','sw_all','sw_clr','solar_incoming','cf_ceres','cot_mod08','sza','cf_ret_liq_mod08']
+        cols = ['ret_albedo','ret_cot_cer','ret_cotstd_cer','time','lat','sw_all','sw_clr','solar_incoming','cf_ceres','cot_mod08','sza','cf_ret_liq_mod08', 'clr_fra']
         df = pd.read_csv(file_path, usecols=cols)
         
         df['albedo'] = ((df['sw_all'] - df['sw_clr']*(1-df['cf_ceres']))/df['cf_ceres']/df['solar_incoming'])
         df['month'] = pd.to_datetime(df['time'], format='mixed').dt.month
         
         df['cot_disp'] = df['ret_cotstd_cer']/df['ret_cot_cer']
-        df['unr_fra'] = (df['cf_ceres'] - df['cf_ret_liq_mod08'])/df['cf_ceres']
+        # df['unr_fra'] = (df['cf_ceres'] - df['cf_ret_liq_mod08'])/df['cf_ceres']
+        df['unr_fra'] = (1 - df['cf_ret_liq_mod08'] - df['clr_fra']) #/ df['cf_ret_liq_mod08']
         
         mask = (df['cf_ceres']>0.3)&(df['cot_mod08']>3)&(df['ret_cot_cer']>3)&(df['ret_albedo'].between(0,1))&(df['albedo'].between(0,1))
         df = df[mask].dropna()
@@ -246,7 +247,7 @@ def plot_combined_4panels():
     all_sza_values = []
     for ocean in oceans:
         file_path = f"{BASE_PATH}/processed_data/merged_msk_and_ret_csv/{ocean}.csv"
-        cols = ['sza', 'cf_ceres', 'cot_mod08', 'ret_cot_cer', 'ret_albedo', 'sw_all', 'sw_clr', 'solar_incoming', 'cf_ret_liq_mod08']
+        cols = ['sza', 'cf_ceres', 'cot_mod08', 'ret_cot_cer', 'ret_albedo', 'sw_all', 'sw_clr', 'solar_incoming', 'cf_ret_liq_mod08', 'clr_fra']
         df = pd.read_csv(file_path, usecols=cols)
         mask = (df['cf_ceres']>0.3)&(df['cot_mod08']>3)&(df['ret_cot_cer']>3)&(df['ret_albedo'].between(0,1))
         all_sza_values.extend(df[mask]['sza'].dropna().values)
@@ -305,8 +306,8 @@ def plot_combined_4panels():
         unr_fra_low_values.append(low_val)
         unr_fra_high_values.append(high_val)
     
-    ax4.bar(x_ocean - bar_width/2, unr_fra_low_values, bar_width, label='low RUR', color=COLORS_SLOPE['low'], alpha=0.8, edgecolor=None)
-    ax4.bar(x_ocean + bar_width/2, unr_fra_high_values, bar_width, label='high RUR', color=COLORS_SLOPE['high'], alpha=0.8, edgecolor=None)
+    ax4.bar(x_ocean - bar_width/2, unr_fra_low_values, bar_width, label='low TZF', color=COLORS_SLOPE['low'], alpha=0.8, edgecolor=None)
+    ax4.bar(x_ocean + bar_width/2, unr_fra_high_values, bar_width, label='high TZF', color=COLORS_SLOPE['high'], alpha=0.8, edgecolor=None)
     ax4.set_title(r'$\mathbf{(e)}$', fontsize=21, loc='left')
     ax4.set_ylabel('$k_{\mathrm{ret}}-k_{\mathrm{msk}}$', fontsize=18)
     ax4.tick_params(axis='y', labelsize=12)
