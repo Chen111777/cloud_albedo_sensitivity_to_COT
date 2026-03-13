@@ -30,10 +30,9 @@ size_paras = {
     'legend': 11,
 }
 
-# ========== 新增：设置colorbar固定上下限 ==========
-COLORBAR_VMIN = -0.25  # 下限
-COLORBAR_VMAX = 2.75   # 上限
-# 创建归一化对象，用于统一所有子图的颜色范围
+# to unify colorbar limits
+COLORBAR_VMIN = -0.25
+COLORBAR_VMAX = 2.75
 NORM = mcolors.Normalize(vmin=COLORBAR_VMIN, vmax=COLORBAR_VMAX)
 
 DIVERGING_CMAP = plt.cm.rainbow
@@ -63,10 +62,9 @@ def plot_single_subplot(ax, lon_grid, lat_grid, data_grid, area_grid, title, cma
                           linestyle='--', alpha=0.6, color='gray')
         gl.top_labels = gl.right_labels = False
 
-    # ========== 修改：添加norm参数，使用固定的归一化范围 ==========
     pc = ax.pcolormesh(lon_grid, lat_grid, data_grid, 
                        cmap=cmap,
-                       norm=NORM,  # 应用固定范围
+                       norm=NORM, 
                        transform=ccrs.PlateCarree(),
                        edgecolors='none', linewidth=0)
     
@@ -147,7 +145,7 @@ def plot_maps_and_barrows(combined_df, ocean_area_order, fig_save_path=None):
         cax=cbar_ax_irf, 
         orientation='horizontal',
         extend='both',
-        norm=NORM,  # ========== 修改：colorbar也应用固定范围 ==========
+        norm=NORM, 
         label='IRF (W m$^{-2}$)'
     )
     cbar_irf.set_label('IRF (W m$^{-2}$)', fontsize=size_paras['ylabel'])
