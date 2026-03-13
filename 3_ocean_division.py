@@ -2,10 +2,9 @@
 """
 ocean_region_analysis.py
 
-- 绘制 oceans 字典中定义的所有经纬度矩形区域（支持跨 180° 子区域拆分）
-- 为每个 ocean 自动分配颜色并在图例中显示
-- 修复并规范化经度到 [-180, 180] 范围
-- 保存图像
+- Plot all latitude–longitude rectangular regions defined in the oceans dictionary
+ (supports splitting subregions crossing 180°).
+- Automatically assign a color to each ocean and display it in the legend.
 """
 
 import os
@@ -122,5 +121,5 @@ if __name__ == "__main__":
         for file in file_paths],
         ignore_index=True)
     # df = df[df['ret_cot_cer'].notna()]
-    output_pattern = '/home/chenyiqi/251028_albedo_cot/SSFproduct/ocean_data0118/'
+    output_pattern = '/home/chenyiqi/251028_albedo_cot/SSFproduct/ocean_data0311/'
     process_file(df, output_pattern)
