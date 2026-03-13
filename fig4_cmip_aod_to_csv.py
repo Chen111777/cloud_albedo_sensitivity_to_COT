@@ -19,7 +19,7 @@ elif exp == 'NorESM2':
     aer_file = '/home/chenyiqi/251201_ERFaci/cmip6/od550aer_AERmon_NorESM2-LM_hist-aer_r1i1p1f1_gn_201501-202012.nc'
 lsmask_path = "/data/chenyiqi/251007_tropic/landsea.nc"
 
-# 核心修改：分别指定nat/aer的时间范围
+# time range of nat/aer
 nat_start_year = 1850
 nat_end_year = 1860
 aer_start_year = 2010
@@ -61,7 +61,7 @@ def load_nc_data(file_path):
     # Standardize longitude to 0-360°
     lon[lon < 0] += 360
     
-    # 提取文件的起始年份（用于计算时间索引）
+    # extract file's start year
     file_time_str = file_path.split('_')[-1].split('-')[0]
     file_base_year = int(file_time_str[:4])
     
@@ -71,34 +71,34 @@ def load_nc_data(file_path):
 od550_nat, lat_had, lon_had, nat_base_year = load_nc_data(nat_file)
 od550_aer, _, _, aer_base_year = load_nc_data(aer_file)
 
-# -------------------------- Time Slicing (核心修改：分别计算nat/aer的时间索引) --------------------------
-# Calculate time indices for nat data (1850-1860)
+# -------------------------- Time Slicing --------------------------
+# Calculate time indices for nat data
 nat_start_idx = (nat_start_year - nat_base_year) * 12
-nat_end_idx = (nat_end_year - nat_base_year + 1) * 12  # Exclusive end index
+nat_end_idx = (nat_end_year - nat_base_year + 1) * 12
 od550_nat_slice = od550_nat[nat_start_idx:nat_end_idx, :, :]
 
-# Calculate time indices for aer data (2010-2020)
+# Calculate time indices for aer data
 aer_start_idx = (aer_start_year - aer_base_year) * 12
-aer_end_idx = (aer_end_year - aer_base_year + 1) * 12  # Exclusive end index
+aer_end_idx = (aer_end_year - aer_base_year + 1) * 12
 od550_aer_slice = od550_aer[aer_start_idx:aer_end_idx, :, :]
 
 # -------------------------- Monthly Average Calculation --------------------------
 n_months = 12
-# 初始化月平均数组
+# initialize
 od550_nat_monthly_avg = np.zeros((n_months, od550_nat_slice.shape[1], od550_nat_slice.shape[2]), dtype=np.float32)
 od550_aer_monthly_avg = np.zeros((n_months, od550_aer_slice.shape[1], od550_aer_slice.shape[2]), dtype=np.float32)
 
-# 对nat数据（1850-1860）按月份平均
+# take monthly average of nat
 for month in range(n_months):
     nat_month_data = od550_nat_slice[month::n_months, :, :]
     od550_nat_monthly_avg[month] = np.nanmean(nat_month_data, axis=0)
 
-# 对aer数据（2010-2020）按月份平均
+# take monthly average of aer
 for month in range(n_months):
     aer_month_data = od550_aer_slice[month::n_months, :, :]
     od550_aer_monthly_avg[month] = np.nanmean(aer_month_data, axis=0)
 
-# 生成月份标签（1-12月）
+# month labels
 months = np.arange(1, n_months+1, dtype=np.int32)
 
 # -------------------------- Interpolation with Longitude Edge Fix --------------------------
@@ -234,7 +234,6 @@ def plot_ln_aod_difference(ln_diff, lat_mesh, lon_mesh, output_path):
     cbar.set_label(f'ln(od550aer) - ln(od550nat) (aer: {aer_start_year}-{aer_end_year}, nat: {nat_start_year}-{nat_end_year})', fontsize=12)
     cbar.ax.tick_params(labelsize=10)
     
-    # Set plot title (体现nat/aer的不同时间范围)
     ax.set_title(f'Global Distribution of ln(AOD$_{{aer}}$) - ln(AOD$_{{nat}}$)\nAER: {aer_start_year}-{aer_end_year} Avg, NAT: {nat_start_year}-{nat_end_year} Avg', 
                  fontsize=14, pad=20)
     
@@ -295,24 +294,24 @@ feature_df.to_csv(csv_filename, index=False, encoding='utf-8')
 print("="*60)
 print("✅ Data Processing Complete!")
 print("="*60)
-print(f"📅 Time Range:")
+print(f"Time Range:")
 print(f"  - NAT Data: {nat_start_year}-{nat_end_year} (multi-year, 12 months avg)")
 print(f"  - AER Data: {aer_start_year}-{aer_end_year} (multi-year, 12 months avg)")
-print(f"🌍 Target Grid:")
+print(f"Target Grid:")
 print(f"  - Latitude: {lat_target.min():.1f}° to {lat_target.max():.1f}° (±60° range) | Points: {len(lat_target)}")
 print(f"  - Longitude: {lon_target.min():.1f}° to {lon_target.max():.1f}° (full 360°) | Points: {len(lon_target)}")
-print(f"📊 Feature Array Shape: {feature_data.shape} (rows × columns)")
-print(f"📋 Feature Columns: {feature_column_names}")
-print(f"💾 Output File: {csv_filename}")
+print(f"Feature Array Shape: {feature_data.shape} (rows × columns)")
+print(f"Feature Columns: {feature_column_names}")
+print(f"Output File: {csv_filename}")
 
 # Validate interpolation results
 lon_vals = feature_data[:, 0]
 lat_vals = feature_data[:, 1]
-print(f"\n🔍 Interpolation Validation:")
+print(f"\nInterpolation Validation:")
 print(f"  - Longitude Range: {np.min(lon_vals):.1f}° to {np.max(lon_vals):.1f}° (expected: -179.5° to 178.5°)")
 print(f"  - Latitude Range: {np.min(lat_vals):.1f}° to {np.max(lat_vals):.1f}° (expected: -59.5° to 59.5°)")
 print(f"  - Valid Samples (non-NaN): {feature_data.shape[0]}")
 
 # Log difference statistics
 valid_diff = feature_data[:, 3]
-print(f"\n📈 ln(aer)-ln(nat) Mean: {np.nanmean(valid_diff):.4f}")
+print(f"\nln(aer)-ln(nat) Mean: {np.nanmean(valid_diff):.4f}")
