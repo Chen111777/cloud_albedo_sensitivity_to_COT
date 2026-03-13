@@ -69,10 +69,7 @@ modis = xr.DataArray(
     name="MODIS_CF"
 )
 
-# 关键：drop=True 才会真的减少维度长度
 modis = modis.where(np.abs(modis["lat"]) <= 60, drop=True)
-
-# 若你要“强行”让坐标标签与 CERES 完全一致（前提是两者同分辨率同网格）
 modis = modis.assign_coords(lat=ds.lat, lon=ds.lon)
 
 modis_frac = modis
