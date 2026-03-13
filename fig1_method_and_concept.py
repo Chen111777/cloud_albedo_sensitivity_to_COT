@@ -390,7 +390,7 @@ if __name__ == "__main__":
     )
 
     # Create figure with custom layout for 5 subplots
-    fig = plt.figure(figsize=(15, 8.5))  # 增加高度以容纳下方的colorbar
+    fig = plt.figure(figsize=(15, 8.5))
     
     # Define grid layout with extra space for colorbars
     gs = fig.add_gridspec(2, 3, hspace=0.5, wspace=0.3, 
@@ -410,10 +410,19 @@ if __name__ == "__main__":
     ax6 = fig.add_subplot(gs[1, 2])
     ax6.axis('off')
     
-    # Set colormap: grey + red + orange + thistle
+    from matplotlib.cm import ScalarMappable
+
+    # ===== 用于(a)(b)散点图的4类云类型色标 =====
     cmap_cld = mcolors.ListedColormap(['grey', 'red', 'orange', 'thistle'])
     bounds = [-0.5, 0.5, 1.5, 2.5, 3.5]
     norm = mcolors.BoundaryNorm(bounds, cmap_cld.N)
+
+    # ===== 用于共享colorbar的5类色标（额外加入 invalid/lightgray）=====
+    cmap_cld_cbar = mcolors.ListedColormap(['lightgray', 'grey', 'red', 'orange', 'thistle'])
+    bounds_cbar = [-0.5, 0.5, 1.5, 2.5, 3.5, 4.5]
+    norm_cbar = mcolors.BoundaryNorm(bounds_cbar, cmap_cld_cbar.N)
+    sm_cld_cbar = ScalarMappable(cmap=cmap_cld_cbar, norm=norm_cbar)
+    sm_cld_cbar.set_array([])
 
     # (a) Full-domain cloud type
     # Plot invalid points first
@@ -601,20 +610,27 @@ if __name__ == "__main__":
          fontsize=15, va='bottom', ha='left')
     plot_global_ax(ax5)
 
-    # ========== 调整colorbar位置和共享 ==========
-    # 1. 创建共享的colorbar (a和b共用)
-    # 计算a和b子图的联合位置
+    # 1. colorbar for a and b
     pos1 = ax1.get_position()
     pos2 = ax2.get_position()
-    
-    # 创建共享colorbar的轴，位于a和b下方
     cbar_ax1 = fig.add_axes([pos1.x0, pos1.y0 - 0.06, pos2.x1 - pos1.x0, 0.02])
-    cbar1 = plt.colorbar(sc1, cax=cbar_ax1, orientation='horizontal', ticks=[0, 1, 2, 3], spacing='proportional')
-    cbar1.ax.set_xticklabels(['Clear Sky', 'Unsuccessfully Retrieved\nLiquid Cloud', 
-                              'Successfully Retrieved\nLiquid Cloud', 'Ice Cloud'], fontsize=10.5)
+    cbar1 = plt.colorbar(
+        sm_cld_cbar,
+        cax=cbar_ax1,
+        orientation='horizontal',
+        ticks=[0, 1, 2, 3, 4],
+        spacing='proportional'
+    )
+    cbar1.ax.set_xticklabels([
+        'Sunglint/\nLarge Zenith Angles',
+        'Clear Sky',
+        'Unretrieved\nLiquid Cloud',
+        'Retrieved\nLiquid Cloud',
+        'Ice Cloud'
+    ], fontsize=10.5)
     cbar1.ax.tick_params(axis='x', pad=8)
     
-    # 2. 创建c图的colorbar，位于其下方
+    # 2. colorbar for panel c
     pos3 = ax3.get_position()
     cbar_ax2 = fig.add_axes([pos3.x0, pos3.y0 - 0.06, pos3.width, 0.02])
     cbar2 = plt.colorbar(sc3, cax=cbar_ax2, orientation='horizontal', label='Cumulative Weight')
