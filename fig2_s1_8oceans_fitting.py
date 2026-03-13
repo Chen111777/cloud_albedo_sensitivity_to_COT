@@ -1,29 +1,25 @@
-# plot_8_oceans.py
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import os
-# 导入函数脚本
 import Ac_cot_fitting_utils as acfu
 
 def plot_8_oceans():
-    # 预处理数据
     all_processed_ocean_data, _ = acfu.preprocess_ocean_data()
     
-    # 创建2x4的子图布局（8个海洋）
     fig, axes = plt.subplots(2, 4, figsize=(16, 8))
     axes = axes.flatten()
     
-    # 子图位置映射
+    # position projection
     position_map = {
         'NAO': 0, 'NPO': 1, 'TIO': 2, 'TAO': 3,
         'TPO': 4, 'SIO': 5, 'SAO': 6, 'SPO': 7
     }
-    
-    # 存储拟合结果
+
+    # to save fitting result
     all_fit_results = []
     
-    # 绘制8个海洋的子图
+    # plot 8 subplots
     for ocean in acfu.oceans:
         if ocean not in position_map or all_processed_ocean_data[ocean] is None:
             continue
@@ -31,19 +27,18 @@ def plot_8_oceans():
         ax_idx = position_map[ocean]
         ocean_data = all_processed_ocean_data[ocean]
         
-        # 绘制子图
         ocean_title = f'{ocean}'
         ocean_results = acfu.plot_axes_content(ocean_data, axes[ax_idx], title=ocean_title)
         
-        # 保存拟合结果
+        # save fitting result
         ocean_result_row = {'Ocean': ocean}
         if ocean_results:
             for key in ['ret', 'cp', 'dcp', 'msk', 'LH74']:
                 g_slope, g_intercept, s_slopes, s_intercepts = ocean_results[key]
-                # 年度斜率和截距
+                # annual
                 ocean_result_row[f'Ann_Slope_{key}'] = g_slope
                 ocean_result_row[f'Ann_Intercept_{key}'] = g_intercept
-                # 季节斜率和截距
+                # seasonal
                 for s_name in acfu.season_dict.keys():
                     ocean_result_row[f'{s_name}_Slope_{key}'] = s_slopes.get(s_name, np.nan)
                     ocean_result_row[f'{s_name}_Intercept_{key}'] = s_intercepts.get(s_name, np.nan)
@@ -56,21 +51,20 @@ def plot_8_oceans():
                     ocean_result_row[f'{s_name}_Intercept_{key}'] = np.nan
         all_fit_results.append(ocean_result_row)
     
-    # 全局轴标签
+    # global axis labels
     fig.text(0.5, 0.04, r'ln(COT)', ha='center', fontsize=16)
     fig.text(0.04, 0.5, r'$\ln\left[A_{\mathrm{c}}/(1-A_{\mathrm{c}})\right]$', va='center', rotation='vertical', fontsize=16)
     
-    # 调整布局
     plt.tight_layout(rect=[0.05, 0.05, 1, 0.98])
     
-    # 保存图表
+    # save figure
     os.makedirs('figs', exist_ok=True)
     output_fig_path = 'figs/fittings_8_oceans.png'
     plt.savefig(output_fig_path, dpi=300, bbox_inches='tight')
     plt.close()
     print(f"8 oceans figure saved to: {output_fig_path}")
     
-    # 保存拟合结果到CSV
+    # save CSV
     output_csv_path = '/home/chenyiqi/251028_albedo_cot/processed_data/slopes_intercepts_8oceans.csv'
     output_df = pd.DataFrame(all_fit_results)
     output_df.to_csv(output_csv_path, index=False)
