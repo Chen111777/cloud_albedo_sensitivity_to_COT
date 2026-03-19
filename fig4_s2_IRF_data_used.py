@@ -26,10 +26,10 @@ INTERMEDIATE_DATA_PATH = OUTPUT_DIR / "IRF_distribution_data.pkl"
 
 # Coefficient file paths (consolidated dict for brevity)
 SLOPE_FILES = {
-    'k1': OUTPUT_DIR / 'table_k1.csv',
-    'k2': OUTPUT_DIR / 'table_k2.csv',
+    'k1': OUTPUT_DIR / 'uncor_k1_values.csv',
+    'k2': OUTPUT_DIR / 'uncor_k2_values.csv',
     'k2_corr': OUTPUT_DIR / 'szacorr_k2_values.csv',
-    'lnb2': OUTPUT_DIR / 'table_lnb2.csv',
+    'lnb2': OUTPUT_DIR / 'uncor_lnb2_values.csv',
     'lnb2_corr': OUTPUT_DIR / 'szacorr_lnb1_values.csv',
     'bello': OUTPUT_DIR / 'Bellouin2013.csv'
 }
