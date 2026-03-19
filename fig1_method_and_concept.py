@@ -24,47 +24,50 @@ wij = np.array([
 wij_flipped = np.flipud(wij)
 wij = np.vstack((wij, wij_flipped))
 wij = wij / np.sum(wij.flatten())
-beta_bins = np.arange(1.32, -1.32+0.01, -0.33)
-delta_bins = np.arange(-1.32, 1.32-0.01, 0.33)
+beta_bins = np.arange(1.32, -1.32 + 0.01, -0.33)
+delta_bins = np.arange(-1.32, 1.32 - 0.01, 0.33)
+
 
 # Calculate delta and beta angles between CERES and MODIS
-def calc_delta_beta(latlon_cer, latlon_mod, latlon_subsat, 
-         sensor_altitude=705., earth_radius=6367.):
+def calc_delta_beta(latlon_cer, latlon_mod, latlon_subsat,
+                    sensor_altitude=705., earth_radius=6367.):
     eq_sat = gu.get_equatorial_vectors(
-            latitude=latlon_subsat[...,0],
-            longitude=latlon_subsat[...,1],
-            )
+        latitude=latlon_subsat[..., 0],
+        longitude=latlon_subsat[..., 1],
+    )
     eq_cer = gu.get_equatorial_vectors(
-            latitude=latlon_cer[...,0],
-            longitude=latlon_cer[...,1],
-            )
+        latitude=latlon_cer[..., 0],
+        longitude=latlon_cer[..., 1],
+    )
     eq_mod = gu.get_equatorial_vectors(
-            latitude=latlon_mod[...,0],
-            longitude=latlon_mod[...,1],
-            )
+        latitude=latlon_mod[..., 0],
+        longitude=latlon_mod[..., 1],
+    )
 
-    CX,CY,CZ = np.split(np.expand_dims(gu.get_view_vectors(
-            sensor_equatorial_vectors = eq_sat,
-            pixel_equatorial_vectors = eq_cer,
-            sensor_altitude = sensor_altitude,
-            earth_radius = earth_radius,
-            ), axis=(1,2)), 3, axis=-1)
-    MX,MY,MZ= np.split(gu.get_view_vectors(
-            sensor_equatorial_vectors = np.expand_dims(eq_sat, axis=(1,2)),
-            pixel_equatorial_vectors = eq_mod,
-            sensor_altitude = sensor_altitude,
-            earth_radius = earth_radius,
-            ), 3, axis=-1)
+    CX, CY, CZ = np.split(np.expand_dims(gu.get_view_vectors(
+        sensor_equatorial_vectors=eq_sat,
+        pixel_equatorial_vectors=eq_cer,
+        sensor_altitude=sensor_altitude,
+        earth_radius=earth_radius,
+    ), axis=(1, 2)), 3, axis=-1)
 
-    delta = np.rad2deg(np.arcsin(np.sum(MY*CZ, axis=-1)))
+    MX, MY, MZ = np.split(gu.get_view_vectors(
+        sensor_equatorial_vectors=np.expand_dims(eq_sat, axis=(1, 2)),
+        pixel_equatorial_vectors=eq_mod,
+        sensor_altitude=sensor_altitude,
+        earth_radius=earth_radius,
+    ), 3, axis=-1)
+
+    delta = np.rad2deg(np.arcsin(np.sum(MY * CZ, axis=-1)))
     delta = np.squeeze(delta)
-    
+
     tmp = np.cross(CZ, MY)
     tmp /= np.linalg.norm(tmp, axis=-1, keepdims=True)
-    beta = np.rad2deg(np.arcsin(-1.*np.sum(tmp*CY, axis=-1)))
+    beta = np.rad2deg(np.arcsin(-1. * np.sum(tmp * CY, axis=-1)))
     beta = np.squeeze(beta)
-        
+
     return delta, beta
+
 
 # Calculate pixel weight for single cloud type
 def get_pixel_weight_1type(
@@ -86,10 +89,10 @@ def get_pixel_weight_1type(
     fra_coarse = np.zeros_like(pixel_num_in_94power, dtype=float)
     valid = pixel_num_in_94power > 0
     fra_coarse[valid] = np.sum(primary_flag * in_94power[valid, :], axis=1) / pixel_num_in_94power[valid]
-    
+
     has_nan = np.any(np.isnan(nan_flag) & in_94power, axis=1)
     possible_mask = (fra_coarse > primary_fra_thre) & ~has_nan
-    
+
     if not np.any(possible_mask):
         return pixel_weight, possible_mask
 
@@ -114,7 +117,7 @@ def get_pixel_weight_1type(
                 if pixel_num == 0:
                     discard_flag = True
                     continue
-                
+
                 weight_ij = wij[ii, jj]
                 uncertainty[k] += np.mean(secondary_uncertainty[mask_angle]) * weight_ij
                 albedo_pure[k] -= np.mean(secondary_albedo[mask_angle]) * weight_ij
@@ -137,7 +140,9 @@ def get_pixel_weight_1type(
                 mask_angle = mask_beta & (delta_pure[k, :] > delta_edge) & (delta_pure[k, :] <= delta_edge + 0.33)
                 if np.any(mask_angle):
                     pixel_weight[mask_angle & primary_flag] += wij[ii, jj]
+
     return pixel_weight, possible_mask
+
 
 # Convert Julian day to datetime
 def julian_to_datetime(julian_days):
@@ -145,6 +150,7 @@ def julian_to_datetime(julian_days):
     base_datetime = datetime(1970, 1, 1, 0, 0, 0)
     days_since_epoch = julian_days - base_julian
     return [base_datetime + timedelta(days=days) for days in days_since_epoch]
+
 
 # Calculate pixel weight for MODIS within CERES FOV
 def get_pixel_weight(
@@ -185,66 +191,115 @@ def get_pixel_weight(
 
     return pixel_weight_ret, latlon_cer[valid_cer_ret_mask], albedo_all[valid_cer_ret_mask], cot_cer[valid_cer_ret_mask]
 
+
 # Upscale and interpolate MODIS data to 1km resolution
 def upscale_and_interpolate(lat, lon, solar_zenith, sensor_zenith, target_shape):
     Ny, Nx = lat.shape
     Ny_new = target_shape[0]
     Nx_new = target_shape[1]
-    
+
     y = np.arange(Ny)
     x = np.arange(Nx)
-    
-    y_new = np.linspace(0, Ny-1, Ny_new)
-    x_new = np.linspace(0, Nx-1, Nx_new)
-    
+
+    y_new = np.linspace(0, Ny - 1, Ny_new)
+    x_new = np.linspace(0, Nx - 1, Nx_new)
+
     mesh_y, mesh_x = np.meshgrid(y_new, x_new, indexing='ij')
     points = np.stack([mesh_y.ravel(), mesh_x.ravel()], axis=-1)
-    
+
     interp_lat = RegularGridInterpolator((y, x), lat)
     interp_lon = RegularGridInterpolator((y, x), lon)
     interp_solar = RegularGridInterpolator((y, x), solar_zenith)
     interp_sensor = RegularGridInterpolator((y, x), sensor_zenith)
+
     lat_new = interp_lat(points).reshape(Ny_new, Nx_new)
     lon_new = interp_lon(points).reshape(Ny_new, Nx_new)
     solar_zenith_new = interp_solar(points).reshape(Ny_new, Nx_new)
     sensor_zenith_new = interp_sensor(points).reshape(Ny_new, Nx_new)
-    
+
     return lat_new, lon_new, solar_zenith_new, sensor_zenith_new
+
 
 # Plot global fitting figure
 def plot_global_ax(ax):
     _, global_processed_data = acfu.preprocess_ocean_data()
-    
-    global_results = acfu.plot_axes_content(global_processed_data, ax, '')
-    
-    all_fit_results = []
+
+    # background density
+    acfu.plot_density_overlay(
+        global_processed_data['x1_ret'], global_processed_data['y1_list_ret'][0],
+        global_processed_data['x1_msk'], global_processed_data['y1_msk'], ax
+    )
+
+    # read ocean-wise fitting results and take mean across oceans
+    input_csv_path = '/home/chenyiqi/251028_albedo_cot/processed_data/k_lnb_by_seasons_oceans.csv'
+    df = pd.read_csv(input_csv_path)
+
+    keys = ['ret', 'cp', 'dcp', 'msk', 'LH74']
+    seasons = list(acfu.season_dict.keys())
+
     global_result_row = {'Ocean': 'Global'}
-    
-    if global_results:
-        for key in ['ret', 'cp', 'dcp', 'msk', 'LH74']: 
-            g_slope, g_intercept, s_slopes, s_intercepts = global_results[key]
-            global_result_row[f'Ann_Slope_{key}'] = g_slope
-            global_result_row[f'Ann_Intercept_{key}'] = g_intercept
-            for s_name in acfu.season_dict.keys():
-                global_result_row[f'{s_name}_Slope_{key}'] = s_slopes.get(s_name, np.nan)
-                global_result_row[f'{s_name}_Intercept_{key}'] = s_intercepts.get(s_name, np.nan)
-    else:
-        for key in ['ret', 'cp', 'dcp', 'msk', 'LH74']:
-            global_result_row[f'Ann_Slope_{key}'] = np.nan
-            global_result_row[f'Ann_Intercept_{key}'] = np.nan
-            for s_name in acfu.season_dict.keys():
-                global_result_row[f'{s_name}_Slope_{key}'] = np.nan
-                global_result_row[f'{s_name}_Intercept_{key}'] = np.nan
-    
-    all_fit_results.append(global_result_row)
-    
+
+    for key in keys:
+        # annual mean
+        global_result_row[f'Ann_Slope_{key}'] = np.nanmean(pd.to_numeric(df[f'Ann_Slope_{key}'], errors='coerce'))
+        global_result_row[f'Ann_Intercept_{key}'] = np.nanmean(pd.to_numeric(df[f'Ann_Intercept_{key}'], errors='coerce'))
+        global_result_row[f'Ann_SlopeUnc_{key}'] = np.nanmean(pd.to_numeric(df[f'Ann_SlopeUnc_{key}'], errors='coerce'))
+        global_result_row[f'Ann_InterceptUnc_{key}'] = np.nanmean(pd.to_numeric(df[f'Ann_InterceptUnc_{key}'], errors='coerce'))
+
+        # seasonal mean
+        for s_name in seasons:
+            global_result_row[f'{s_name}_Slope_{key}'] = np.nanmean(
+                pd.to_numeric(df[f'{s_name}_Slope_{key}'], errors='coerce')
+            )
+            global_result_row[f'{s_name}_Intercept_{key}'] = np.nanmean(
+                pd.to_numeric(df[f'{s_name}_Intercept_{key}'], errors='coerce')
+            )
+            global_result_row[f'{s_name}_SlopeUnc_{key}'] = np.nanmean(
+                pd.to_numeric(df[f'{s_name}_SlopeUnc_{key}'], errors='coerce')
+            )
+            global_result_row[f'{s_name}_InterceptUnc_{key}'] = np.nanmean(
+                pd.to_numeric(df[f'{s_name}_InterceptUnc_{key}'], errors='coerce')
+            )
+
+    # plot lines using mean results
+    x2 = global_processed_data['x2']
+    line_handles = []
+    line_labels = []
+
+    plot_specs = [
+        ('LH74', 'black', '-'),
+        ('dcp', 'red', '--'),
+        ('cp', 'orange', '-'),
+        ('ret', 'blue', '--'),
+        ('msk', 'magenta', '-')
+    ]
+
+    for key, color, linestyle in plot_specs:
+        k = global_result_row[f'Ann_Slope_{key}']
+        b = global_result_row[f'Ann_Intercept_{key}']
+        y_line = k * x2 + b
+
+        sign = '+' if b >= 0 else ''
+        eq = f'y={k:.2f}x{sign}{b:.1f}'
+        line = ax.plot(x2, y_line, color=color, linestyle=linestyle, lw=1.5, label=f'{key}: {eq}')
+        line_handles.append(line[0])
+        line_labels.append(f'{key}: {eq}')
+
+    ax.legend(handles=line_handles, labels=line_labels, fontsize=9, loc='upper left')
+    ax.grid(True, linestyle='--', alpha=0.3)
     ax.set_xlabel(r'ln(COT)', fontsize=14)
     ax.set_ylabel(r'$\ln\left[A_{\mathrm{c}}/(1-A_{\mathrm{c}})\right]$', fontsize=14)
-    
-    output_csv_path = '/home/chenyiqi/251028_albedo_cot/processed_data/slopes_intercepts_global.csv'
-    output_df = pd.DataFrame(all_fit_results)
+    ax.set_xlim(0.5, 3.5)
+    ax.set_ylim(-2.0, 1.5)
+
+    # save global mean results
+    output_csv_path = '/home/chenyiqi/251028_albedo_cot/processed_data/k_lnb_global_by_seasons.csv'
+    output_df = pd.DataFrame([global_result_row])
     output_df.to_csv(output_csv_path, index=False)
     print(f"Global slope and intercept results saved to: {output_csv_path}")
+
+    return global_result_row
+
 
 # Main process
 if __name__ == "__main__":
@@ -276,8 +331,8 @@ if __name__ == "__main__":
     solar_zenith_mod = uft.read_and_mask_mod_variable(hdf, 'Solar_Zenith')
     lon_min = np.nanmin(lon_mod)
     lon_max = np.nanmax(lon_mod)
-    if (lon_max-lon_min) > 180:
-        lon_mod[lon_mod<0] = lon_mod[lon_mod<0] + 360
+    if (lon_max - lon_min) > 180:
+        lon_mod[lon_mod < 0] = lon_mod[lon_mod < 0] + 360
 
     # Read 1km MODIS data
     qa1km = hdf.select('Quality_Assurance_1km').get()
@@ -299,7 +354,7 @@ if __name__ == "__main__":
     # Classify cloud types
     cld_retrieval_mask = np.where((Cloud_Retrieval_Phase_Flag == 2) & (Primary_Cloud_Retrieval_Outcome_Flag == 1), 1, 0)
     cld_mask = np.where((Cloud_Retrieval_Phase_Flag == 2) & (Cloudiness_Flag <= 1), 1, 0)
-    nan_mask = ((Cloud_Retrieval_Phase_Flag != 2) & (Primary_Cloud_Retrieval_Outcome_Flag == 1)) | (ctt_mod < 273.15-5)
+    nan_mask = ((Cloud_Retrieval_Phase_Flag != 2) & (Primary_Cloud_Retrieval_Outcome_Flag == 1)) | (ctt_mod < 273.15 - 5)
     cld_type = cld_retrieval_mask.astype(int) + cld_mask.astype(int)
     cld_type = np.where(nan_mask, 3, cld_type)
 
@@ -335,10 +390,12 @@ if __name__ == "__main__":
     grid_window = [[54., 55.], [-136., -135.]]
     lat_min, lat_max = grid_window[0]
     lon_min, lon_max = grid_window[1]
-    
+
     # Regional valid data mask
-    regional_valid_mask = (lat_mod_valid > lat_min-0.5) & (lat_mod_valid < lat_max+0.5) & \
-                          (lon_mod_valid > lon_min-0.5) & (lon_mod_valid < lon_max+0.5)
+    regional_valid_mask = (
+        (lat_mod_valid > lat_min - 0.5) & (lat_mod_valid < lat_max + 0.5) &
+        (lon_mod_valid > lon_min - 0.5) & (lon_mod_valid < lon_max + 0.5)
+    )
     indices_regional_valid = np.where(regional_valid_mask)
     cld_type = cld_type_valid[indices_regional_valid].flatten()
     lat_mod = lat_mod_valid[indices_regional_valid].flatten()
@@ -346,9 +403,11 @@ if __name__ == "__main__":
     latlon_mod = np.stack((lat_mod, lon_mod), axis=1)
 
     # Regional invalid data mask
-    regional_invalid_mask = invalid_mask & \
-                            (lat_mod_full_original > lat_min-0.5) & (lat_mod_full_original < lat_max+0.5) & \
-                            (lon_mod_full_original > lon_min-0.5) & (lon_mod_full_original < lon_max+0.5)
+    regional_invalid_mask = (
+        invalid_mask &
+        (lat_mod_full_original > lat_min - 0.5) & (lat_mod_full_original < lat_max + 0.5) &
+        (lon_mod_full_original > lon_min - 0.5) & (lon_mod_full_original < lon_max + 0.5)
+    )
     indices_regional_invalid = np.where(regional_invalid_mask)
     lat_mod_regional_invalid = lat_mod_full_original[indices_regional_invalid].flatten()
     lon_mod_regional_invalid = lon_mod_full_original[indices_regional_invalid].flatten()
@@ -372,7 +431,10 @@ if __name__ == "__main__":
     time_low = time_mod - timedelta(minutes=5)
     time_high = time_mod + timedelta(minutes=5)
     time_cond = np.array([t >= time_low for t in time_ssf]) & np.array([t <= time_high for t in time_ssf])
-    spatial_cond = (latlon_cer[:, 0] > lat_min) & (latlon_cer[:, 0] < lat_max) & (latlon_cer[:, 1] > lon_min) & (latlon_cer[:, 1] < lon_max)
+    spatial_cond = (
+        (latlon_cer[:, 0] > lat_min) & (latlon_cer[:, 0] < lat_max) &
+        (latlon_cer[:, 1] > lon_min) & (latlon_cer[:, 1] < lon_max)
+    )
     indices = time_cond & spatial_cond
 
     if not np.any(indices):
@@ -389,49 +451,66 @@ if __name__ == "__main__":
         cld_type, latlon_cer, latlon_mod, latlon_subsat, albedo_all, cot_cer
     )
 
-    # Create figure with custom layout for 5 subplots
+    # =========================
+    # Create figure with new layout
+    # (a) Data Domains
+    # (b) Full Granule
+    # (c) Processed Grid
+    # (d) Identified FOSRs
+    # (e) Slope Fittings
+    # =========================
     fig = plt.figure(figsize=(15, 8.5))
-    
-    # Define grid layout with extra space for colorbars
-    gs = fig.add_gridspec(2, 3, hspace=0.5, wspace=0.3, 
-                          height_ratios=[1, 0.9],
-                          bottom=0.08, top=0.95)
-    
-    # First row: 3 subplots (a, b, c)
-    ax1 = fig.add_subplot(gs[0, 0])  # (a) Full-domain cloud type
-    ax2 = fig.add_subplot(gs[0, 1])  # (b) Regional cloud type
-    ax3 = fig.add_subplot(gs[0, 2])  # (c) Retrieval weight
-    
-    # Second row: 2 centered subplots (d, e) - use middle two columns
-    ax4 = fig.add_subplot(gs[1, 0])  # (d) Empty plot
-    ax5 = fig.add_subplot(gs[1, 1])  # (e) Global fitting
-    
-    # Hide the unused sixth subplot position (gs[1,2])
+
+    gs = fig.add_gridspec(
+        2, 3,
+        hspace=0.5, wspace=0.3,
+        height_ratios=[1, 0.9],
+        bottom=0.08, top=0.95
+    )
+
+    ax1 = fig.add_subplot(gs[0, 0])  # (a) Data Domains
+    ax2 = fig.add_subplot(gs[0, 1])  # (b) Full Granule
+    ax3 = fig.add_subplot(gs[0, 2])  # (c) Processed Grid
+    ax4 = fig.add_subplot(gs[1, 0])  # (d) Identified FOSRs
+    ax5 = fig.add_subplot(gs[1, 1])  # (e) Slope Fittings
+
+    # Hide unused panel
     ax6 = fig.add_subplot(gs[1, 2])
     ax6.axis('off')
-    
+
     from matplotlib.cm import ScalarMappable
 
-    # ===== 用于(a)(b)散点图的4类云类型色标 =====
     cmap_cld = mcolors.ListedColormap(['grey', 'red', 'orange', 'thistle'])
     bounds = [-0.5, 0.5, 1.5, 2.5, 3.5]
     norm = mcolors.BoundaryNorm(bounds, cmap_cld.N)
 
-    # ===== 用于共享colorbar的5类色标（额外加入 invalid/lightgray）=====
     cmap_cld_cbar = mcolors.ListedColormap(['lightgray', 'grey', 'red', 'orange', 'thistle'])
     bounds_cbar = [-0.5, 0.5, 1.5, 2.5, 3.5, 4.5]
     norm_cbar = mcolors.BoundaryNorm(bounds_cbar, cmap_cld_cbar.N)
     sm_cld_cbar = ScalarMappable(cmap=cmap_cld_cbar, norm=norm_cbar)
     sm_cld_cbar.set_array([])
 
-    # (a) Full-domain cloud type
-    # Plot invalid points first
-    ax1.scatter(lon_mod_full_invalid, lat_mod_full_invalid, s=0.04, c='lightgray', marker='o', edgecolors='None')
-    # Plot valid points
-    sc1 = ax1.scatter(lon_mod_full, lat_mod_full, s=0.04, c=cld_type_full, marker='o', cmap=cmap_cld, norm=norm, edgecolors='None')
-    ax1.grid(True, linestyle='--', alpha=0.5)
-    ax1.text(-0.01, 1.01, r'$\mathbf{(a)}$ Full Granule', transform=ax1.transAxes, 
-         fontsize=15, va='bottom', ha='left')
+    # -------------------------
+    # (a) Data Domains
+    # -------------------------
+    ax1.text(-0.01, 1.01, r'$\mathbf{(a)}$ Data Domains',
+             transform=ax1.transAxes, fontsize=15, va='bottom', ha='left')
+    ax1.set_xticks([])
+    ax1.set_yticks([])
+    for spine in ax1.spines.values():
+        spine.set_visible(True)
+
+    # -------------------------
+    # (b) Full Granule
+    # -------------------------
+    ax2.scatter(lon_mod_full_invalid, lat_mod_full_invalid, s=0.04, c='lightgray',
+                marker='o', edgecolors='None')
+    sc1 = ax2.scatter(lon_mod_full, lat_mod_full, s=0.04, c=cld_type_full,
+                      marker='o', cmap=cmap_cld, norm=norm, edgecolors='None')
+    ax2.grid(True, linestyle='--', alpha=0.5)
+    ax2.text(-0.01, 1.01, r'$\mathbf{(b)}$ Full Granule',
+             transform=ax2.transAxes, fontsize=15, va='bottom', ha='left')
+
     rect = patches.Rectangle(
         (lon_min, lat_min),
         lon_max - lon_min,
@@ -440,96 +519,104 @@ if __name__ == "__main__":
         edgecolor='blue',
         facecolor='none'
     )
-    ax1.add_patch(rect)
+    ax2.add_patch(rect)
 
-    # Customize longitude ticks
-    lon_ticks = ax1.get_xticks()
-    lon_tick_labels = []
-    for lon in lon_ticks:
+    # Customize longitude ticks for full granule
+    lon_ticks_full = ax2.get_xticks()
+    lon_tick_labels_full = []
+    for lon in lon_ticks_full:
         if not np.isnan(lon):
             if lon < 0:
-                lon_tick_labels.append(f"{int(abs(lon))}°W")
+                lon_tick_labels_full.append(f"{int(abs(lon))}°W")
             elif lon > 0:
-                lon_tick_labels.append(f"{int(lon)}°E")
+                lon_tick_labels_full.append(f"{int(lon)}°E")
             else:
-                lon_tick_labels.append("0°")
+                lon_tick_labels_full.append("0°")
         else:
-            lon_tick_labels.append("")
-    ax1.set_xticklabels(lon_tick_labels, fontsize=9)
+            lon_tick_labels_full.append("")
+    ax2.set_xticklabels(lon_tick_labels_full, fontsize=9)
 
-    # Customize latitude ticks
-    lat_ticks = ax1.get_yticks()
-    lat_tick_labels = []
-    for lat in lat_ticks:
+    # Customize latitude ticks for full granule
+    lat_ticks_full = ax2.get_yticks()
+    lat_tick_labels_full = []
+    for lat in lat_ticks_full:
         if not np.isnan(lat):
             if lat < 0:
-                lat_tick_labels.append(f"{int(abs(lat))}°S")
+                lat_tick_labels_full.append(f"{int(abs(lat))}°S")
             elif lat > 0:
-                lat_tick_labels.append(f"{int(lat)}°N")
+                lat_tick_labels_full.append(f"{int(lat)}°N")
             else:
-                lat_tick_labels.append("0°")
+                lat_tick_labels_full.append("0°")
         else:
-            lat_tick_labels.append("")
-    ax1.set_yticklabels(lat_tick_labels, fontsize=9)
+            lat_tick_labels_full.append("")
+    ax2.set_yticklabels(lat_tick_labels_full, fontsize=9)
 
-    # (b) Regional cloud type
-    # Plot regional invalid points first
-    ax2.scatter(lon_mod_regional_invalid, lat_mod_regional_invalid, s=8, c='lightgray', marker='o', edgecolors='None')
-    # Plot regional valid points
-    sc2 = ax2.scatter(lon_mod, lat_mod, c=cld_type, s=8, marker='o', cmap=cmap_cld, norm=norm, edgecolors='None')
-    ax2.set_xlim(grid_window[1])
-    ax2.set_ylim(grid_window[0])
-    ax2.text(-0.01, 1.01, r'$\mathbf{(b)}$ Processed Grid', transform=ax2.transAxes, 
-         fontsize=15, va='bottom', ha='left')
+    # -------------------------
+    # (c) Processed Grid
+    # -------------------------
+    ax3.scatter(lon_mod_regional_invalid, lat_mod_regional_invalid, s=8, c='lightgray',
+                marker='o', edgecolors='None')
+    sc2 = ax3.scatter(lon_mod, lat_mod, c=cld_type, s=8, marker='o',
+                      cmap=cmap_cld, norm=norm, edgecolors='None')
+    ax3.set_xlim(grid_window[1])
+    ax3.set_ylim(grid_window[0])
+    ax3.text(-0.01, 1.01, r'$\mathbf{(c)}$ Processed Grid',
+             transform=ax3.transAxes, fontsize=15, va='bottom', ha='left')
 
-    # Customize longitude ticks
     lon_start = grid_window[1][0]
     lon_end = grid_window[1][1]
-    lon_ticks = np.arange(lon_start, lon_end + 0.01, 0.3)
-    ax2.set_xticks(lon_ticks)
-    lon_tick_labels = []
-    for lon in lon_ticks:
+    lon_ticks_reg = np.arange(lon_start, lon_end + 0.01, 0.3)
+    ax3.set_xticks(lon_ticks_reg)
+
+    lon_tick_labels_reg = []
+    for lon in lon_ticks_reg:
         if not np.isnan(lon):
             if lon < 0:
-                lon_tick_labels.append(f"{abs(lon):.1f}°W")
+                lon_tick_labels_reg.append(f"{abs(lon):.1f}°W")
             elif lon > 0:
-                lon_tick_labels.append(f"{lon:.1f}°E")
+                lon_tick_labels_reg.append(f"{lon:.1f}°E")
             else:
-                lon_tick_labels.append("0°")
+                lon_tick_labels_reg.append("0°")
         else:
-            lon_tick_labels.append("")
-    ax2.set_xticklabels(lon_tick_labels, fontsize=9)
+            lon_tick_labels_reg.append("")
+    ax3.set_xticklabels(lon_tick_labels_reg, fontsize=9)
 
-    # Customize latitude ticks
-    lat_ticks = ax2.get_yticks()
-    lat_tick_labels = []
-    for lat in lat_ticks:
+    lat_ticks_reg = ax3.get_yticks()
+    lat_tick_labels_reg = []
+    for lat in lat_ticks_reg:
         if not np.isnan(lat):
             if lat < 0:
-                lat_tick_labels.append(f"{abs(lat):.1f}°S")
+                lat_tick_labels_reg.append(f"{abs(lat):.1f}°S")
             elif lat > 0:
-                lat_tick_labels.append(f"{lat:.1f}°N")
+                lat_tick_labels_reg.append(f"{lat:.1f}°N")
             else:
-                lat_tick_labels.append("0°")
+                lat_tick_labels_reg.append("0°")
         else:
-            lat_tick_labels.append("")
-    ax2.set_yticklabels(lat_tick_labels, fontsize=9)
+            lat_tick_labels_reg.append("")
+    ax3.set_yticklabels(lat_tick_labels_reg, fontsize=9)
 
-    # (c) Retrieval weight
+    # -------------------------
+    # (d) Identified FOSRs
+    # -------------------------
     colors_white2blue = [
         (1.0, 1.0, 1.0, 1.0),
         (0.1216, 0.4039, 0.6745)
     ]
-    cmap_white2blue = mcolors.LinearSegmentedColormap.from_list('white2blue', colors_white2blue, N=256)
-    sc3 = ax3.scatter(lon_mod, lat_mod, c=weight_ret, s=8, cmap=cmap_white2blue, marker='o', edgecolors='None')
-    # Plot orange center points
+    cmap_white2blue = mcolors.LinearSegmentedColormap.from_list(
+        'white2blue', colors_white2blue, N=256
+    )
+
+    sc3 = ax4.scatter(lon_mod, lat_mod, c=weight_ret, s=8,
+                      cmap=cmap_white2blue, marker='o', edgecolors='None')
+
     if center_latlon is not None and len(center_latlon) > 0:
-        scatter_pts = ax3.scatter(center_latlon[:, 1], center_latlon[:, 0], c='orange', s=14, marker='o')
-    
-    ax3.set_xlim(grid_window[1])
-    ax3.set_ylim(grid_window[0])
-    ax3.text(-0.01, 1.01, r'$\mathbf{(c)}$ Identified FOSRs', transform=ax3.transAxes, 
-         fontsize=15, va='bottom', ha='left')
+        ax4.scatter(center_latlon[:, 1], center_latlon[:, 0],
+                    c='orange', s=14, marker='o')
+
+    ax4.set_xlim(grid_window[1])
+    ax4.set_ylim(grid_window[0])
+    ax4.text(-0.01, 1.01, r'$\mathbf{(d)}$ Identified FOSRs',
+             transform=ax4.transAxes, fontsize=15, va='bottom', ha='left')
 
     # Annotate orange points
     if center_latlon is not None and len(center_latlon) > 0:
@@ -553,7 +640,7 @@ if __name__ == "__main__":
 
             label_text = "({:.1f}, {:.2f})".format(cot_val, albedo_val)
 
-            ax3.text(
+            ax4.text(
                 x=lon_pt - 0.06,
                 y=lat_pt + 0.02,
                 s=label_text,
@@ -563,57 +650,51 @@ if __name__ == "__main__":
                 color='black'
             )
 
-    ax3.text(0.01, 0.68, r'(COT$_{\mathrm{ret}}, A_{\mathrm{c,ret}})$:', transform=ax3.transAxes, fontsize=11.5, va='top', ha='left')
-    
-    # Customize longitude ticks
-    ax3.set_xticks(lon_ticks)
-    lon_tick_labels = []
-    for lon in lon_ticks:
+    ax4.text(0.01, 0.68, r'(COT$_{\mathrm{ret}}, A_{\mathrm{c,ret}})$:',
+             transform=ax4.transAxes, fontsize=11.5, va='top', ha='left')
+
+    ax4.set_xticks(lon_ticks_reg)
+    lon_tick_labels_ret = []
+    for lon in lon_ticks_reg:
         if not np.isnan(lon):
             if lon < 0:
-                lon_tick_labels.append(f"{abs(lon):.1f}°W")
+                lon_tick_labels_ret.append(f"{abs(lon):.1f}°W")
             elif lon > 0:
-                lon_tick_labels.append(f"{lon:.1f}°E")
+                lon_tick_labels_ret.append(f"{lon:.1f}°E")
             else:
-                lon_tick_labels.append("0°")
+                lon_tick_labels_ret.append("0°")
         else:
-            lon_tick_labels.append("")
-    ax3.set_xticklabels(lon_tick_labels, fontsize=9)
+            lon_tick_labels_ret.append("")
+    ax4.set_xticklabels(lon_tick_labels_ret, fontsize=9)
 
-    # Customize latitude ticks
-    lat_ticks = ax3.get_yticks()
-    lat_tick_labels = []
-    for lat in lat_ticks:
+    lat_ticks_ret = ax4.get_yticks()
+    lat_tick_labels_ret = []
+    for lat in lat_ticks_ret:
         if not np.isnan(lat):
             if lat < 0:
-                lat_tick_labels.append(f"{abs(lat):.1f}°S")
+                lat_tick_labels_ret.append(f"{abs(lat):.1f}°S")
             elif lat > 0:
-                lat_tick_labels.append(f"{lat:.1f}°N")
+                lat_tick_labels_ret.append(f"{lat:.1f}°N")
             else:
-                lat_tick_labels.append("0°")
+                lat_tick_labels_ret.append("0°")
         else:
-            lat_tick_labels.append("")
-    ax3.set_yticklabels(lat_tick_labels, fontsize=9)
+            lat_tick_labels_ret.append("")
+    ax4.set_yticklabels(lat_tick_labels_ret, fontsize=9)
 
-    # (d) Empty subplot with border but no ticks
-    ax4.text(-0.01, 1.01, r'$\mathbf{(d)}$ Data Domains', transform=ax4.transAxes, 
-         fontsize=15, va='bottom', ha='left')
-    # Remove ticks but keep spines (border)
-    ax4.set_xticks([])
-    ax4.set_yticks([])
-    # Ensure spines are visible
-    for spine in ax4.spines.values():
-        spine.set_visible(True)
-
-    # (e) Global fitting plot
-    ax5.text(-0.01, 1.01, r'$\mathbf{(e)}$ Slope Fittinngs', transform=ax5.transAxes, 
-         fontsize=15, va='bottom', ha='left')
+    # -------------------------
+    # (e) Slope Fittings
+    # -------------------------
+    ax5.text(-0.01, 1.01, r'$\mathbf{(e)}$ Slope Fittings',
+             transform=ax5.transAxes, fontsize=15, va='bottom', ha='left')
     plot_global_ax(ax5)
 
-    # 1. colorbar for a and b
-    pos1 = ax1.get_position()
+    # -------------------------
+    # Colorbars
+    # -------------------------
+    # colorbar for panels (b) and (c)
     pos2 = ax2.get_position()
-    cbar_ax1 = fig.add_axes([pos1.x0, pos1.y0 - 0.06, pos2.x1 - pos1.x0, 0.02])
+    pos3 = ax3.get_position()
+    cbar_ax1 = fig.add_axes([pos2.x0, pos2.y0 - 0.06, pos3.x1 - pos2.x0, 0.02])
     cbar1 = plt.colorbar(
         sm_cld_cbar,
         cax=cbar_ax1,
@@ -629,16 +710,18 @@ if __name__ == "__main__":
         'Ice Cloud'
     ], fontsize=10.5)
     cbar1.ax.tick_params(axis='x', pad=8)
-    
-    # 2. colorbar for panel c
-    pos3 = ax3.get_position()
-    cbar_ax2 = fig.add_axes([pos3.x0, pos3.y0 - 0.06, pos3.width, 0.02])
-    cbar2 = plt.colorbar(sc3, cax=cbar_ax2, orientation='horizontal', label='Cumulative Weight')
+
+    # colorbar for panel (d)
+    pos4 = ax4.get_position()
+    cbar_ax2 = fig.add_axes([pos4.x0, pos4.y0 - 0.06, pos4.width, 0.02])
+    cbar2 = plt.colorbar(
+        sc3, cax=cbar_ax2, orientation='horizontal', label='Cumulative Weight'
+    )
     cbar2.ax.get_xaxis().get_label().set_fontsize(10.5)
-    
+
     # Adjust layout
     plt.tight_layout()
-    
+
     # Ensure figs directory exists
     os.makedirs('figs', exist_ok=True)
     plt.savefig('figs/illustration_5panels.png', dpi=300, bbox_inches='tight')
