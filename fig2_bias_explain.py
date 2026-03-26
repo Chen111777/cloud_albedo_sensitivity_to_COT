@@ -219,9 +219,9 @@ def process_all_oceans(n_bins=2):
         df['unr_fra'] = (1 - df['cf_ret_liq_mod08'] - df['clr_fra'])
 
         mask = (
-            (df['cf_ceres'] > 0.3) &
-            (df['cot_mod08'] > 3) &
-            (df['ret_cot_cer'] > 3) &
+            (df['cf_ceres'] > 0.1) &
+            (df['cot_mod08'] > 2.5) &
+            (df['ret_cot_cer'] > 2.5) &
             (df['ret_albedo'].between(0, 1)) &
             (df['albedo'].between(0, 1))
         )
