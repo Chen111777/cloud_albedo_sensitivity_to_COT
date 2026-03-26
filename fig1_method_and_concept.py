@@ -3,6 +3,7 @@ import numpy as np
 from datetime import datetime, timedelta
 from pyhdf.SD import SD, SDC
 from scipy.interpolate import RegularGridInterpolator
+from scipy import stats
 import pickle
 import xarray as xr
 import os
@@ -222,7 +223,9 @@ def upscale_and_interpolate(lat, lon, solar_zenith, sensor_zenith, target_shape)
 
 # Plot global fitting figure
 def plot_global_ax(ax):
-    _, global_processed_data = acfu.preprocess_ocean_data()
+    _, global_processed_data = acfu.preprocess_ocean_data(
+		min_cot_mod08=2.5,
+		min_ret_cot_cer=2.5)
 
     # background density
     acfu.plot_density_overlay(
@@ -230,36 +233,110 @@ def plot_global_ax(ax):
         global_processed_data['x1_msk'], global_processed_data['y1_msk'], ax
     )
 
-    # read ocean-wise fitting results and take mean across oceans
-    input_csv_path = '/home/chenyiqi/251028_albedo_cot/processed_data/k_lnb_by_seasons_oceans.csv'
-    df = pd.read_csv(input_csv_path)
-
     keys = ['ret', 'cp', 'dcp', 'msk', 'LH74']
     seasons = list(acfu.season_dict.keys())
 
     global_result_row = {'Ocean': 'Global'}
 
-    for key in keys:
-        # annual mean
-        global_result_row[f'Ann_Slope_{key}'] = np.nanmean(pd.to_numeric(df[f'Ann_Slope_{key}'], errors='coerce'))
-        global_result_row[f'Ann_Intercept_{key}'] = np.nanmean(pd.to_numeric(df[f'Ann_Intercept_{key}'], errors='coerce'))
-        global_result_row[f'Ann_SlopeUnc_{key}'] = np.nanmean(pd.to_numeric(df[f'Ann_SlopeUnc_{key}'], errors='coerce'))
-        global_result_row[f'Ann_InterceptUnc_{key}'] = np.nanmean(pd.to_numeric(df[f'Ann_InterceptUnc_{key}'], errors='coerce'))
+    # Fit directly on global samples to keep consistent with sensitivity_test_satellite.py.
+    fig_tmp, ax_tmp = plt.subplots(figsize=(4, 3))
+    try:
+        line_handles_tmp = []
+        line_labels_tmp = []
 
-        # seasonal mean
+        ret_result = acfu.plot_weighted_fit_line(
+            global_processed_data['ret_cot'],
+            global_processed_data['ret_albedo_list'][0],
+            global_processed_data['sza'],
+            global_processed_data['season'],
+            global_processed_data['x2'],
+            'blue',
+            'ret',
+            line_handles_tmp,
+            line_labels_tmp,
+            ax_tmp,
+            linestyle='--',
+            cot_std=0.1,
+            albedo_std=0.13,
+        )
+
+        cp_result = acfu.plot_weighted_fit_line(
+            global_processed_data['ret_cot'],
+            global_processed_data['ret_albedo_list'][1],
+            global_processed_data['sza'],
+            global_processed_data['season'],
+            global_processed_data['x2'],
+            'orange',
+            'cp',
+            line_handles_tmp,
+            line_labels_tmp,
+            ax_tmp,
+            linestyle='-',
+            cot_std=0.0,
+            albedo_std=0.03,
+        )
+
+        dcp_result = acfu.plot_weighted_fit_line(
+            global_processed_data['ret_cot'],
+            global_processed_data['ret_albedo_list'][2],
+            global_processed_data['sza'],
+            global_processed_data['season'],
+            global_processed_data['x2'],
+            'red',
+            'dcp',
+            line_handles_tmp,
+            line_labels_tmp,
+            ax_tmp,
+            linestyle='--',
+            cot_std=0.0,
+            albedo_std=0.03,
+        )
+
+        msk_result = acfu.plot_weighted_fit_line(
+            global_processed_data['msk_cot'],
+            global_processed_data['msk_albedo'],
+            global_processed_data['sza'],
+            global_processed_data['season'],
+            global_processed_data['x2'],
+            'magenta',
+            'msk',
+            line_handles_tmp,
+            line_labels_tmp,
+            ax_tmp,
+            linestyle='-',
+            cot_std=0.1,
+            albedo_std=0.20,
+        )
+    finally:
+        plt.close(fig_tmp)
+
+    # LH74 line follows existing fig2 logic (deterministic line in transformed space).
+    k_lh74, b_lh74, _, _, _ = stats.linregress(global_processed_data['x2'], global_processed_data['y22'])
+
+    fit_results = {
+        'ret': ret_result[:8],
+        'cp': cp_result[:8],
+        'dcp': dcp_result[:8],
+        'msk': msk_result[:8],
+        'LH74': (k_lh74, b_lh74, 0.0, 0.0, {}, {}, {}, {}),
+    }
+
+    for key in keys:
+        (
+            global_k, global_b, global_k_unc, global_b_unc,
+            season_k, season_b, season_k_unc, season_b_unc
+        ) = fit_results[key]
+
+        global_result_row[f'Ann_Slope_{key}'] = global_k
+        global_result_row[f'Ann_Intercept_{key}'] = global_b
+        global_result_row[f'Ann_SlopeUnc_{key}'] = global_k_unc
+        global_result_row[f'Ann_InterceptUnc_{key}'] = global_b_unc
+
         for s_name in seasons:
-            global_result_row[f'{s_name}_Slope_{key}'] = np.nanmean(
-                pd.to_numeric(df[f'{s_name}_Slope_{key}'], errors='coerce')
-            )
-            global_result_row[f'{s_name}_Intercept_{key}'] = np.nanmean(
-                pd.to_numeric(df[f'{s_name}_Intercept_{key}'], errors='coerce')
-            )
-            global_result_row[f'{s_name}_SlopeUnc_{key}'] = np.nanmean(
-                pd.to_numeric(df[f'{s_name}_SlopeUnc_{key}'], errors='coerce')
-            )
-            global_result_row[f'{s_name}_InterceptUnc_{key}'] = np.nanmean(
-                pd.to_numeric(df[f'{s_name}_InterceptUnc_{key}'], errors='coerce')
-            )
+            global_result_row[f'{s_name}_Slope_{key}'] = season_k.get(s_name, np.nan)
+            global_result_row[f'{s_name}_Intercept_{key}'] = season_b.get(s_name, np.nan)
+            global_result_row[f'{s_name}_SlopeUnc_{key}'] = season_k_unc.get(s_name, np.nan)
+            global_result_row[f'{s_name}_InterceptUnc_{key}'] = season_b_unc.get(s_name, np.nan)
 
     # plot lines using mean results
     x2 = global_processed_data['x2']
