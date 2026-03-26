@@ -104,16 +104,17 @@ def plot_maps_and_barrows(combined_df, ocean_area_order, fig_save_path=None):
         pivot_grid = df_grid.pivot(index='lat', columns='lon', values=col)
         return pivot_grid.reindex(index=lats, columns=lons).values
 
-    # Create figure with 2x3 layout (5 subplots total, 1 empty)
-    fig = plt.figure(figsize=(16, 5))
+    # Create figure with a vertical 3x2 layout.
+    fig = plt.figure(figsize=(12, 8))
     proj = ccrs.PlateCarree()
-    
-    # Create subplot axes (2 rows x 3 columns)
-    ax1 = fig.add_subplot(2, 3, 1, projection=proj)  # Row1-Col1: IRF_ret_orig
-    ax2 = fig.add_subplot(2, 3, 2, projection=proj)  # Row2-Col2: IRF_ret_corr1
-    ax3 = fig.add_subplot(2, 3, 3, projection=proj)  # Row1-Col3: IRF_ret_corr2
-    ax4 = fig.add_subplot(2, 3, 4, projection=proj)  # Row2-Col1: IRF_msk_orig
-    ax5 = fig.add_subplot(2, 3, 5, projection=proj)  # Row2-Col2: IRF_msk_corr
+    grid_spec = fig.add_gridspec(3, 2)
+
+    # Left column: Retrieval-domain, right column: Mask-domain.
+    ax1 = fig.add_subplot(grid_spec[0, 0], projection=proj)
+    ax2 = fig.add_subplot(grid_spec[1, 0], projection=proj)
+    ax3 = fig.add_subplot(grid_spec[2, 0], projection=proj)
+    ax4 = fig.add_subplot(grid_spec[0, 1], projection=proj)
+    ax5 = fig.add_subplot(grid_spec[1, 1], projection=proj)
 
     # Generate data grids
     area_grid          = make_grid('grid_area_km2')
@@ -125,21 +126,19 @@ def plot_maps_and_barrows(combined_df, ocean_area_order, fig_save_path=None):
 
     # Plot subplots
     pc1 = plot_single_subplot(ax1, lon_grid, lat_grid, irf_ret_orig_grid,  area_grid, r'$\mathbf{(a)}$ Original', DIVERGING_CMAP)
-    pc2 = plot_single_subplot(ax2, lon_grid, lat_grid, irf_ret_corr1_grid, area_grid, r'$\mathbf{(b)}$ Corrected for 10:30',   DIVERGING_CMAP)
-    pc3 = plot_single_subplot(ax3, lon_grid, lat_grid, irf_ret_corr2_grid, area_grid, r'$\mathbf{(c)}$ Corrected for daytime', DIVERGING_CMAP)
-    pc4 = plot_single_subplot(ax4, lon_grid, lat_grid, irf_msk_orig_grid,  area_grid, r'$\mathbf{(d)}$ Original',       DIVERGING_CMAP)
-    pc5 = plot_single_subplot(ax5, lon_grid, lat_grid, IRF_msk_corr_grid, area_grid, r'$\mathbf{(e)}$ Corrected for 10:30',     DIVERGING_CMAP)
+    pc2 = plot_single_subplot(ax2, lon_grid, lat_grid, irf_ret_corr1_grid, area_grid, r'$\mathbf{(c)}$ Corrected for 10:30',   DIVERGING_CMAP)
+    pc3 = plot_single_subplot(ax3, lon_grid, lat_grid, irf_ret_corr2_grid, area_grid, r'$\mathbf{(e)}$ Corrected for daytime', DIVERGING_CMAP)
+    pc4 = plot_single_subplot(ax4, lon_grid, lat_grid, irf_msk_orig_grid,  area_grid, r'$\mathbf{(b)}$ Original',       DIVERGING_CMAP)
+    pc5 = plot_single_subplot(ax5, lon_grid, lat_grid, IRF_msk_corr_grid, area_grid, r'$\mathbf{(d)}$ Corrected for 10:30',     DIVERGING_CMAP)
 
-    # Add method labels to the left of each row
-    # Add "Cloud-Retrieval Method" to Row 1 (top row)
-    fig.text(0.5, 0.94, 'Retrieval-Domain', fontsize=12, fontweight='bold', 
+    # Add method labels above each column.
+    fig.text(0.265, 0.965, 'Retrieval-Domain', fontsize=12, fontweight='bold',
              ha='center', va='center')
-    # Add "Cloud-Mask Method" to Row 2 (bottom row)
-    fig.text(0.5, 0.445, 'Mask-Domain', fontsize=12, fontweight='bold', 
+    fig.text(0.735, 0.965, 'Mask-Domain', fontsize=12, fontweight='bold',
              ha='center', va='center')
 
-    # Add shared horizontal colorbar
-    cbar_ax_irf = fig.add_axes([0.695, 0.25, 0.26, 0.035])
+    # Add shared horizontal colorbar in the empty bottom-right slot.
+    cbar_ax_irf = fig.add_axes([0.54, 0.20, 0.40, 0.025])
     cbar_irf = fig.colorbar(
         pc1, 
         cax=cbar_ax_irf, 
@@ -153,12 +152,12 @@ def plot_maps_and_barrows(combined_df, ocean_area_order, fig_save_path=None):
 
     # Adjust subplot spacing
     plt.subplots_adjust(
-        left=0.04,
-        right=0.96,
-        bottom=0.05,
-        top=0.9,
-        wspace=0.25,
-        hspace=0.4
+        left=0.05,
+        right=0.95,
+        bottom=0.06,
+        top=0.94,
+        wspace=0.18,
+        hspace=0.28
     )
 
     # Save figure if path provided
