@@ -579,7 +579,11 @@ def plot_density_overlay(x_ret, y_ret, x_msk, y_msk, ax, sample_size=5000):
         )
 
 
-def preprocess_ocean_data():
+def preprocess_ocean_data(
+    min_cot_mod08=2.0,
+    min_ret_cot_cer=2.0,
+    min_cf_liq_ceres=None
+):
     """
     Preprocess data for all ocean regions.
     """
@@ -619,11 +623,13 @@ def preprocess_ocean_data():
                 df.loc[df['month'].isin(months), 'season'] = season_name
 
             mask = (
-                (df['cot_mod08'] > 2) &
-                (df['ret_cot_cer'] > 2) &
+                (df['cot_mod08'] > min_cot_mod08) &
+                (df['ret_cot_cer'] > min_ret_cot_cer) &
                 (df['ret_albedo'] > 0) & (df['ret_albedo'] < 1) &
                 (df['albedo'] > 0) & (df['albedo'] < 1)
             )
+            if min_cf_liq_ceres is not None:
+                mask = mask & (df['cf_liq_ceres'] > min_cf_liq_ceres)
             df_filtered = df[mask].dropna().reset_index(drop=True)
 
             if len(df_filtered) == 0:
