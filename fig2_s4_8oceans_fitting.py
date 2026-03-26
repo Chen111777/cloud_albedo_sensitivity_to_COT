@@ -6,7 +6,9 @@ import Ac_cot_fitting_utils as acfu
 
 
 def plot_8_oceans():
-    all_processed_ocean_data, _ = acfu.preprocess_ocean_data()
+    all_processed_ocean_data, _ = acfu.preprocess_ocean_data(
+		min_cot_mod08=2.5,
+		min_ret_cot_cer=2.5)
 
     fig, axes = plt.subplots(2, 4, figsize=(16, 8))
     axes = axes.flatten()
