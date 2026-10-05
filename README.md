@@ -1,13 +1,17 @@
-0: list level-2 CERES and MODIS file name
+0_: List level-2 CERES and MODIS file name
 
-1: get both cloud albedo and COT for fields of successful retrievals (geo_utils.py and uniform_fov_tools.py are used)
+1_: Abstract RFOV observations by hemisphere and month
 
-2: get level-3 cloud albedo and COT
+2_: Reconstruct RFOV observations into seasons and oceans
 
-3: divide one file into each oceanic region a file
+3_: Abstract 1°×1° grid cell observations by season and ocean
 
-4: merge results from process 2 and 3, and filter invalid grid cell
+4_: Abstract industrial-era AOD change from CMIP files
 
-build_sbdart_input/: transform surface albode and meteorological profiles from CERES and ERA5 to SBDART INPUT formation. run_sbdart.py calls sbdart by seasons and regions.
+5_: Calculate RF_aic and ERF_CO2 required by Fig. 4
 
-figxxx and tablexxx: codes for creating all figures and tables (Ac_cot_fitting_utils.py is used)
+SBDART_LUT/: To transform surface albode and meteorological profiles from CERES and ERA5 to INPUT formation and run SBDAR by seasons and regions
+
+figx_ & figsupp_: Codes for figures in Manuscript and Supplememtary Material
+
+processed_data/: Intermediate and ploted data
