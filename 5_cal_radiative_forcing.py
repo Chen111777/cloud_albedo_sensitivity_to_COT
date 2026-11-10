@@ -2,7 +2,18 @@
 calc_all_forcing.py
 Combine 5_ERF_CO2.py + 6_cal_radiative_forcing.py
 1) compute ERF_CO2 per‑ocean basin
-2) compute Original(LH74) / Corrected IRF_aci per‑ocean basin
+2) compute the uncorrected IRF_aci using CERES-derived cloud albedo Ac,
+   and the Corrected IRF_aci using the fitted COT-albedo relation.
+   The uncorrected Ac is derived from CERES TOA all-sky/clear-sky shortwave
+   fluxes and the CERES-EBAF total cloud fraction.
+The Corrected relation uses the k and ln b fitted in
+fig3_sbd_seasonal_3ratios_8oceans.py; those coefficients are reported for every
+ocean AND every season, so the correction is applied season by season
+(each L3 season file is weighted with its own fitted k and ln b).
+The aerosol-cloud interaction coefficient dlnNd/dlnAOD is the mean of
+Hasekamp (2019) and Bellouin et al. (2013); H19 gives one value per ocean
+(used for all four seasons), B13 is seasonal, so LNND_O_LNAOD is averaged
+per ocean-season pair.
 Output two csv files under processed_data/:
     ERF_CO2_ocean_regions.csv
     fig4_revision_impacts.csv
@@ -10,6 +21,7 @@ Output two csv files under processed_data/:
 import glob
 import os
 import netCDF4 as nc
+import xarray as xr
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -102,10 +114,89 @@ def run_erf_co2(base_dir: Path):
 from utils_fitting import cot_k_b_to_albedo, oceans, season_dict
 from utils_solar import calc_grid_cell_area, calc_monthly_swdown
 
-# dlnNd/dlnAOD from Hasekamp (2019)
-LNND = {
-    'NAO': 0.40,
-    'TAO': 0.41,
+# CERES-EBAF input. Cloud fraction used to derive Ac is taken from
+# CERES-EBAF itself, following fig3_sbd_seasonal_k_8oceans.py.
+CERES_FILE = (
+    "/home/chenyiqi/251028_albedo_cot/CERES_EBAF_TOA_2020/"
+    "CERES_EBAF-TOA_Ed4.2.1_Subset_202001-202012.nc"
+)
+
+def load_ebaf_ac_grid():
+    """Calculate monthly CERES-EBAF Ac using CERES-EBAF cloud fraction.
+
+    Ac = [SW_all - (1-CF)*SW_clear] / (CF*solar),
+    where CF = cldarea_total_daynight_mon / 100.
+    """
+    with xr.open_dataset(CERES_FILE) as ds:
+        cf = ds["cldarea_total_daynight_mon"] / 100.0
+        ac = (
+            ds["toa_sw_all_mon"] - (1.0 - cf) * ds["toa_sw_clr_c_mon"]
+        ) / cf / ds["solar_mon"]
+        ac = ac.where((cf > 0) & np.isfinite(ac) & (ac >= 0) & (ac <= 1))
+        result = ac.load()
+    return result
+
+
+def match_ebaf_ac_to_l3(data, ebaf_ac_grid):
+    """Match monthly CERES-EBAF Ac to L3 samples by nearest lat/lon and month.
+
+    The Ac grid is calculated using CERES-EBAF cloud fraction, not MODIS CF.
+    """
+    lower = {str(c).lower(): c for c in data.columns}
+    lat_col = next((lower[x] for x in ("lat", "latitude") if x in lower), None)
+    lon_col = next((lower[x] for x in ("lon", "longitude") if x in lower), None)
+    if lat_col is None or lon_col is None:
+        raise ValueError(f"L3 data requires lat/lon columns; got {list(data.columns)}")
+    month_col = next(
+        (lower[x] for x in ("month", "time", "date", "year_month", "yyyymm") if x in lower),
+        None,
+    )
+    if month_col is None:
+        raise ValueError(f"L3 data requires a month/time column; got {list(data.columns)}")
+
+    lat = pd.to_numeric(data[lat_col], errors="coerce").to_numpy(float)
+    lon = ((pd.to_numeric(data[lon_col], errors="coerce").to_numpy(float) + 180.0) % 360.0) - 180.0
+    grid_lat = np.asarray(ebaf_ac_grid.lat, dtype=float)
+    grid_lon = ((np.asarray(ebaf_ac_grid.lon, dtype=float) + 180.0) % 360.0) - 180.0
+    lat_idx = np.abs(lat[:, None] - grid_lat[None, :]).argmin(axis=1)
+    lon_idx = np.abs(lon[:, None] - grid_lon[None, :]).argmin(axis=1)
+    ac_values = np.asarray(ebaf_ac_grid.values)
+
+    values = data[month_col]
+    if np.issubdtype(values.dtype, np.number):
+        numeric = pd.to_numeric(values, errors="coerce").to_numpy(float)
+        months = np.where(numeric >= 10000, numeric % 100, numeric)
+    else:
+        months = pd.to_datetime(values, errors="coerce").dt.month.to_numpy(dtype=float)
+
+    time_months = pd.to_datetime(ebaf_ac_grid.time.values).month
+    output = np.full(len(data), np.nan, dtype=float)
+    for i, month in enumerate(months):
+        if not np.isfinite(month) or month < 1 or month > 12:
+            continue
+        month_idx = np.flatnonzero(time_months == int(month))
+        if month_idx.size:
+            output[i] = ac_values[month_idx[0], lat_idx[i], lon_idx[i]]
+    return output
+
+
+# dlnNd/dlnAOD from Jia (2021) -- kept for reference, not used.
+# LNND_O_LNAOD = {
+#     'NAO': 0.44,
+#     'TAO': 0.24,
+#     'SAO': 0.34,
+#     'TIO': 0.15,
+#     'SIO': 0.30,
+#     'NPO': 0.57,
+#     'TPO': 0.34,
+#     'SPO': 0.20,
+# }
+
+# dlnNd/dlnAOD from Hasekamp (2019). H19 reports one value per ocean basin,
+# so the same coefficient is used for all four seasons.
+HASEKAMP2019_LNND_O_LNAOD = {
+    'NAO': 0.41,
+    'TAO': 0.40,
     'SAO': 0.52,
     'TIO': 0.53,
     'SIO': 0.52,
@@ -113,6 +204,52 @@ LNND = {
     'TPO': 0.39,
     'SPO': 0.34,
 }
+
+# dlnNd/dlnAOD from Bellouin et al. (2013), tabulated per ocean basin and
+# per season (columns DJF, MAM, JJA, SON), read from processed data.
+BELLOUIN2013_LNND_O_LNAOD_CSV = Path(
+    "/home/chenyiqi/251028_albedo_cot/processed_data/Bellouin2013.csv"
+)
+
+
+def load_bellouin2013_lnnd_o_lnaod(csv_path=BELLOUIN2013_LNND_O_LNAOD_CSV):
+    """Load the Bellouin et al. (2013) dlnNd/dlnAOD table.
+
+    Returns a dict keyed by (ocean, season), e.g. {('NPO', 'MAM'): 0.266}.
+    """
+    df = pd.read_csv(csv_path).set_index("Ocean")
+    missing = [season for season in season_dict if season not in df.columns]
+    if missing:
+        raise ValueError(
+            f"{csv_path} is missing the season columns {missing}; "
+            f"available columns: {list(df.columns)}"
+        )
+    table = {}
+    for ocean in df.index:
+        for season in season_dict:
+            value = df.loc[ocean, season]
+            if pd.isna(value):
+                raise ValueError(
+                    f"Missing dlnNd/dlnAOD for {ocean}-{season} in {csv_path}"
+                )
+            table[(ocean, season)] = float(value)
+    return table
+
+
+BELLOUIN2013_LNND_O_LNAOD = load_bellouin2013_lnnd_o_lnaod()
+
+# Coefficient used by the calculation: the mean of Hasekamp (2019) and
+# Bellouin et al. (2013). H19 has no seasonal dependence, so its value is
+# repeated for every season and the average is taken per (ocean, season).
+LNND_O_LNAOD = {
+    (ocean, season): 0.5 * (
+        HASEKAMP2019_LNND_O_LNAOD[ocean]
+        + BELLOUIN2013_LNND_O_LNAOD[(ocean, season)]
+    )
+    for ocean in oceans
+    for season in season_dict
+}
+
 
 def load_cmip(base_dir:Path):
     CMIP_FILE = base_dir / "processed_data" / "cmip6_AodDiff_nat1850to1860_aer2010to2020_HadGEM3.csv"
@@ -127,22 +264,26 @@ def load_cmip(base_dir:Path):
     return df
 
 def load_coefficients(base_dir:Path):
-    K_CSV = base_dir / "processed_data" / "fig3_sbd_daytime_relation_8oceans_fits.csv"
-    return pd.read_csv(K_CSV).set_index("Ocean")
+    """k and ln b of the COT-albedo relation fitted by
+    fig3_sbd_seasonal_3ratios_8oceans.py. The csv holds one row for every
+    ocean-season pair, so the index is (Ocean, Season)."""
+    K_CSV = base_dir / "processed_data" / "fig3_sbd_seasonal_3ratios_8oceans.csv"
+    return pd.read_csv(K_CSV).set_index(["Ocean", "Season"])
 
-def compute_irf(ocean, coeff, base_dir:Path):
+
+def compute_irf(ocean, coeff, base_dir:Path, ebaf_ac_grid):
     L3_DIR = base_dir / "L3_product"
     cmip = load_cmip(base_dir)
-    k_corrected = float(coeff.loc[ocean, "k"])
-    b_corrected = np.exp(float(coeff.loc[ocean, "lnb"]))
-    k_original = 1.0
-    b_original = 0.13
-    total = {"original": 0.0, "corrected": 0.0}
+    total = {"ceres": 0.0, "corrected": 0.0}
     area_total = 0.0
+
     for season in season_dict:
         file = L3_DIR / f"{ocean}_{season}.csv"
         if not file.exists():
             continue
+
+        k_corrected = float(coeff.loc[(ocean, season), "k_fit"])
+        b_corrected = float(np.exp(coeff.loc[(ocean, season), "lnb_fit"]))
         data = pd.read_csv(file)
         data["time"] = pd.to_datetime(data["time"])
         data["month"] = data["time"].dt.month
@@ -153,49 +294,107 @@ def compute_irf(ocean, coeff, base_dir:Path):
             left_on=["month", "lat_round", "lon_round"],
             right_on=["month", "lat", "lon"],
             how="left",
-            suffixes=("", "_cmip")
+            suffixes=("", "_cmip"),
         )
         data.drop(
             columns=["lat_round", "lon_round", "lat_cmip", "lon_cmip"],
-            errors="ignore", inplace=True
+            errors="ignore",
+            inplace=True,
         )
+
         cot = data["cot"].to_numpy(float)
-        cf = data["cf_liq_ceres"].to_numpy(float)
+        # Keep the original L3 liquid-cloud fraction for forcing area weighting.
+        # This is distinct from the CERES-EBAF total CF used to derive Ac.
+        if "cf_liq_ceres" not in data.columns:
+            raise KeyError(
+                f"{file} is missing 'cf_liq_ceres'; available columns: {list(data.columns)}"
+            )
+        cf_liq_weight = data["cf_liq_ceres"].to_numpy(float)
         aod_diff = data["log_aod_diff"].to_numpy(float)
-        swdown = np.array([calc_monthly_swdown(lat, month=m) for lat,m in zip(data["lat"], data["month"])])
-        area = np.array([calc_grid_cell_area(lat) for lat in data["lat"]])
-        base = swdown * LNND[ocean] * aod_diff / 3.0
-        for name, k, b in [("original", k_original, b_original), ("corrected", k_corrected, b_corrected)]:
-            albedo = cot_k_b_to_albedo(cot, k, b)
-            value = base * k * albedo * (1-albedo) * cf
-            valid = np.isfinite(value) & np.isfinite(area) & (area>0)
-            total[name] += np.sum(value[valid] * area[valid])
-        valid_area = np.isfinite(area) & (area>0)
+        lat_values = data["lat"].to_numpy(float)
+        lon_values = data["lon"].to_numpy(float)
+        months = data["month"].to_numpy(int)
+
+        # Use CERES-EBAF Ac, calculated with CERES-EBAF cloud fraction.
+        ac_ceres = match_ebaf_ac_to_l3(data, ebaf_ac_grid)
+
+        swdown = np.array([
+            calc_monthly_swdown(lat, month=m)
+            for lat, m in zip(lat_values, months)
+        ])
+        area = np.array([calc_grid_cell_area(lat) for lat in lat_values])
+        # dlnNd/dlnAOD for this ocean-season (mean of H19 and B13).
+        lnnd = LNND_O_LNAOD[(ocean, season)] * aod_diff
+        base = - swdown * lnnd / 3.0
+
+        # Before revision: use CERES-derived Ac directly, with k=1.
+        value_ceres = base * ac_ceres * (1.0 - ac_ceres) * cf_liq_weight
+        valid_ceres = (
+            np.isfinite(value_ceres) & np.isfinite(area) & (area > 0)
+        )
+        total["ceres"] += np.sum(value_ceres[valid_ceres] * area[valid_ceres])
+
+        # After revision: use the fitted k and b for this ocean-season.
+        ac_corrected = cot_k_b_to_albedo(cot, k_corrected, b_corrected)
+        value_corrected = (
+            base * k_corrected * ac_corrected * (1.0 - ac_corrected) * cf_liq_weight
+        )
+        valid_corrected = (
+            np.isfinite(value_corrected) & np.isfinite(area) & (area > 0)
+        )
+        total["corrected"] += np.sum(
+            value_corrected[valid_corrected] * area[valid_corrected]
+        )
+
+        valid_area = np.isfinite(area) & (area > 0)
         area_total += np.sum(area[valid_area])
+
     if area_total == 0:
         return np.nan, np.nan, area_total
-    return total["original"]/area_total, total["corrected"]/area_total, area_total
+    return total["ceres"] / area_total, total["corrected"] / area_total, area_total
+
 
 def run_irf_calc(base_dir:Path):
     OUTPUT_CSV = base_dir / "processed_data" / "fig4_revision_impacts.csv"
     coeff = load_coefficients(base_dir)
+    ebaf_ac_grid = load_ebaf_ac_grid()
     records = []
+
+    print(
+        "[IRF-ACI] lnnd_o_lnaod: mean of Hasekamp (2019) and "
+        f"Bellouin et al. (2013), per ocean-season "
+        f"({len(LNND_O_LNAOD)} values)",
+        flush=True,
+    )
+
     for ocean in oceans:
-        if ocean not in LNND:
+        if not any((ocean, season) in LNND_O_LNAOD for season in season_dict):
             continue
-        print("Processing", ocean)
-        original, corrected, area = compute_irf(ocean, coeff, base_dir)
-        records.append({"Ocean": ocean, "Original": original, "Corrected": corrected, "Area": area})
+        print("Processing", ocean, flush=True)
+        ceres_irf, corrected, area = compute_irf(ocean, coeff, base_dir, ebaf_ac_grid)
+        records.append({
+            "Ocean": ocean,
+            "CERES": ceres_irf,
+            "Corrected": corrected,
+            "Area": area,
+        })
+
     result = pd.DataFrame(records)
-    global_original = np.sum(result["Original"] * result["Area"]) / np.sum(result["Area"])
-    global_corrected = np.sum(result["Corrected"] * result["Area"]) / np.sum(result["Area"])
-    print("\nGlobal ocean area‑weighted IRF:")
-    print(f"Original:  {global_original:.4f} W m-2")
-    print(f"Corrected: {global_corrected:.4f} W m-2")
-    print(f"Difference: {global_corrected - global_original:.4f} W m-2")
+    weights = result["Area"]
+    total_area = np.sum(weights)
+    global_ceres = np.sum(result["CERES"] * weights) / total_area
+    global_corrected = np.sum(result["Corrected"] * weights) / total_area
+    print("\nGlobal ocean area-weighted IRF:")
+    print(f"CERES-EBAF-derived Ac (before revision): {global_ceres:.4f} W m-2")
+    print(f"Corrected (after revision)        : {global_corrected:.4f} W m-2")
+    print(
+        f"Difference (corrected - CERES-EBAF Ac): "
+        f"{global_corrected - global_ceres:.4f} W m-2"
+    )
+
     OUTPUT_CSV.parent.mkdir(exist_ok=True)
     result.to_csv(OUTPUT_CSV, index=False)
-    print(f"\n[IRF‑ACI] Saved: {OUTPUT_CSV}")
+    print(f"\n[IRF-ACI] Saved: {OUTPUT_CSV}")
     print(result)
     return result
 
@@ -205,7 +404,7 @@ def main():
     BASE_DIR = Path(__file__).resolve().parent
     # step 1: compute per‑ocean ERF_CO2
     _ = run_erf_co2(BASE_DIR)
-    # step 2: compute per‑ocean Original / Corrected IRF_aci
+    # step 2: compute the per-ocean CERES-EBAF-Ac / Corrected IRF_aci
     _ = run_irf_calc(BASE_DIR)
     print("\n==== All forcing calculation finished. ====")
 
