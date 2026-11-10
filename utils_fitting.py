@@ -1,14 +1,14 @@
 """
-utils_fig_common.py
+utils_fitting_110723.py
 
-Shared utility functions and constants for fig2_curves_by_ocean_and_aod.py
-and fig3_bias_attribution.py.
+Direct nonlinear COT-albedo fitting and SBDART helpers for RFOV/SBD figures.
 """
 
 import os
 import numpy as np
 import pandas as pd
 from scipy.interpolate import RegularGridInterpolator
+from scipy.optimize import curve_fit
 import xarray as xr
 
 # ============================================================
@@ -50,47 +50,25 @@ def cot_k_b_to_albedo(cot, k, b):
 # Fitting helper functions
 # ============================================================
 
-def _raw_to_fit_arrays(cot, albedo):
-    cot = np.asarray(cot, dtype=float).ravel()
-    albedo = np.asarray(albedo, dtype=float).ravel()
-
-    cot = np.clip(cot, 1e-6, None)
-    albedo = np.clip(albedo, 1e-6, 1 - 1e-6)
-
-    x = cot_to_x(cot)
-    y = albedo_to_y(albedo)
-    return x, y
+def _cot_lnb_to_albedo(cot, k, ln_b):
+    """Evaluate b*COT**k/(1+b*COT**k), with b=exp(ln_b), stably."""
+    eta = ln_b + k * np.log(np.asarray(cot, dtype=float))
+    return np.exp(-np.logaddexp(0.0, -eta))
 
 
-def _fit_lstsq_with_uncertainty(x, y):
-    """Fit y = k*x + ln(b) and estimate Jacobian-based standard errors.
-
-    All binned points receive equal weight. Parameter covariance is estimated
-    as s^2 * (J.T @ J)^-1, where s^2 is the residual variance and J is the
-    Jacobian (the design matrix for this linear model).
-    """
-    x = np.asarray(x, dtype=float).ravel()
-    y = np.asarray(y, dtype=float).ravel()
-
-    if x.size < 3:
-        raise ValueError("At least 3 points are required.")
-
-    design = np.column_stack([x, np.ones_like(x)])
-    beta, _, rank, _ = np.linalg.lstsq(design, y, rcond=None)
-    if rank < design.shape[1]:
-        raise np.linalg.LinAlgError("The design matrix is rank deficient.")
-
-    residual = y - design @ beta
-    degrees_of_freedom = x.size - design.shape[1]
-    residual_variance = np.sum(residual ** 2) / degrees_of_freedom
-    covariance = residual_variance * np.linalg.pinv(design.T @ design)
-    parameter_std = np.sqrt(np.maximum(np.diag(covariance), 0.0))
-
-    return beta[0], beta[1], parameter_std[0], parameter_std[1]
+def _cot_lnb_jacobian(cot, k, ln_b):
+    """Jacobian of untransformed albedo with respect to (k, ln_b)."""
+    albedo = _cot_lnb_to_albedo(cot, k, ln_b)
+    sensitivity = albedo * (1.0 - albedo)
+    return np.column_stack([sensitivity * np.log(cot), sensitivity])
 
 
 def fit_cot_albedo(cot, albedo):
-    """Fit the COT-albedo relation by equal-weight least squares.
+    """Fit Ac = b*COT**k/(1+b*COT**k) by nonlinear least squares.
+
+    Minimize squared residuals in albedo, not logit(albedo). COT and albedo
+    are passed to curve_fit without coordinate transformations. Optimize
+    k and ln(b) directly, with b=exp(ln(b)) positive by construction.
 
     Parameters
     ----------
@@ -99,7 +77,10 @@ def fit_cot_albedo(cot, albedo):
     Returns
     -------
     k, ln_b, k_std, ln_b_std : float
-        Best-fit slope and intercept and their one-sigma standard errors.
+        Nonlinear-fit parameters and approximate one-sigma standard errors.
+        Covariance is scaled by RSS/(n-2) in albedo space. Standard errors
+        come directly from the covariance of (k, ln b). It assumes independent,
+        homoscedastic albedo residuals.
     """
     cot = np.asarray(cot, dtype=float).ravel()
     albedo = np.asarray(albedo, dtype=float).ravel()
@@ -115,14 +96,19 @@ def fit_cot_albedo(cot, albedo):
     cot = cot[mask]
     albedo = albedo[mask]
 
-    if cot.size < 3:
+    if cot.size < 3 or np.unique(cot).size < 2:
         return np.nan, np.nan, np.nan, np.nan
-
-    x, y = _raw_to_fit_arrays(cot, albedo)
-
     try:
-        return _fit_lstsq_with_uncertainty(x, y)
-    except Exception:
+        parameters, covariance = curve_fit(
+            _cot_lnb_to_albedo, cot, albedo,
+            p0=(0.7, np.log(0.1)),
+            method='trf', jac=_cot_lnb_jacobian,
+            absolute_sigma=False, max_nfev=10000,
+        )
+        k, ln_b = parameters
+        standard_errors = np.sqrt(np.maximum(np.diag(covariance), 0.0))
+        return k, ln_b, standard_errors[0], standard_errors[1]
+    except (RuntimeError, ValueError, FloatingPointError, np.linalg.LinAlgError):
         return np.nan, np.nan, np.nan, np.nan
 
 
