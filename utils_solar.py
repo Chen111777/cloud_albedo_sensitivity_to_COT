@@ -88,6 +88,9 @@ def calc_monthly_swdown(lat, year=2020, month=None):
     """Approximate monthly mean daily-mean insolation for a latitude."""
     if month is None:
         raise ValueError('month is required')
+    # Accept numpy / pandas scalars coming from DataFrames.
+    year = int(year)
+    month = int(month)
     from calendar import monthrange
     start = pd.Timestamp(year=year, month=month, day=1)
     days = [start + pd.Timedelta(days=i) for i in range(monthrange(year, month)[1])]
