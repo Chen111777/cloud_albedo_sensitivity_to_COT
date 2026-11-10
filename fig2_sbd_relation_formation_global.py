@@ -11,7 +11,7 @@ from utils_fitting import (
 
 BASE_DIR = Path(__file__).resolve().parent
 RFOV_DIR = BASE_DIR / 'RFOV_product' / 'ocean_season'
-MIN_COT = 2.5
+MIN_COT = 2
 MIN_GROUP_SIZE = 5
 
 COLORS = {
@@ -93,7 +93,7 @@ def fit_and_plot(ax, data, albedo_col, label, color, edges, linestyle='-', linew
     fit_albedo = 1 / (1 + np.exp(-(k * cot_to_x(cot_fit) + b)))
     ax.plot(
         cot_fit, fit_albedo, color=color, lw=linewidth, ls=linestyle,
-        label=rf'{label}: $k$={k:.2f}$\pm${k_std:.2f}', alpha=.9,
+        label=rf'{label}: $k$={k:.2f}', alpha=.9,
     )
 
 
@@ -101,7 +101,8 @@ def prepare_data(data):
     data = data.copy()
     # SBD-Reproduce (fixed SZA), Real SZA: default (gasdcp/aoddcp/sfcdcp) vis LUT
     data['visible'] = calculate_sbdart(data, 'gasdcp_aoddcp_sfcdcp_vis', 0)
-    # extra reference: SBDART visible at the diffuse SZA theta = arccos(1/sqrt(3))
+    # Fixed-SZA reference for visible-band SBDART:
+    # mu=1/sqrt(3) -> SZA=54.7°.
     data['visible_mu13'] = calculate_sbdart(
         data, 'gasdcp_aoddcp_sfcdcp_vis', np.degrees(np.arccos(3 ** (-0.5)))
     )
@@ -114,21 +115,24 @@ def prepare_data(data):
 
 
 def draw_global(ax, data, curves):
-    """Plot the requested subset of curves (order: analy_mu13, analy,
-    visible_mu13, visible, sza, shortwave, gas, aod, surface)."""
+    """Plot the requested subset of curves (order: analy_mu13, visible_mu13,
+    analy, visible, sza, shortwave, gas, aod, surface)."""
     edges = np.geomspace(MIN_COT, 76, 17)
     cot_fit = np.geomspace(MIN_COT, 76, 200)
 
     if 'analy_mu13' in curves:
         ax.plot(cot_fit, cot_to_albedo(cot_fit, 'analy', miu=3 ** (-0.5)),
-                color='k', lw=1.8, label=r'Analytical (54.7°): $k$=1.00')
+                color='k', ls='-', lw=1.8,
+                label=r'Anal-54.7°: $k$=1.00')
     if 'visible_mu13' in curves:
-        fit_and_plot(ax, data, 'visible_mu13', r'VIS, cld-only (54.7°)', '0.5', edges)
+        fit_and_plot(ax, data, 'visible_mu13', r'SBD-54.7°', '0.5', edges,
+                     linestyle='-')
     if 'analy' in curves:
         ax.plot(cot_fit, cot_to_albedo(cot_fit, 'analy', miu=1),
-                color='k', ls='--', lw=1.8, label=r'Analytical (0°): $k$=1.00')
+                color='k', ls='--', lw=1.8,
+                label=r'Anal-0°: $k$=1.00')
     if 'visible' in curves:
-        fit_and_plot(ax, data, 'visible', r'VIS, cld-only (0°)', COLORS['visible'],
+        fit_and_plot(ax, data, 'visible', r'SBD-0°', COLORS['visible'],
                      edges, linestyle='--')
     if 'sza' in curves:
         fit_and_plot(ax, data, 'sza', r'Real SZA', COLORS['sza'], edges)
@@ -149,13 +153,13 @@ def draw_global(ax, data, curves):
     ax.yaxis.label.set_size(14)
     ax.grid(alpha=.25)
     ax.tick_params(labelsize=8.5)
-    ax.legend(loc='lower right', fontsize=8.5, framealpha=.85)
+    ax.legend(loc='lower right', fontsize=9.5, framealpha=.85)
 
 
 def main():
     data = prepare_data(load_rfov())
     fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(8, 4.1))
-    # lines 1-5 in panel a; lines 5-8 in panel b (line 5 = sza in both)
+    # Panel a includes the two analytical reference curves; panel b remains unchanged.
     draw_global(
         ax_a, data,
         ('analy_mu13', 'analy', 'visible_mu13', 'visible', 'sza'),
