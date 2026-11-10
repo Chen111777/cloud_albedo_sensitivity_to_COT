@@ -12,12 +12,12 @@ from utils_fitting import cot_to_albedo, fit_cot_albedo
 BASE_PATH = '/home/chenyiqi/251028_albedo_cot'
 TABLE_FOLDER = 'gascp_aodcp_sfccp_sw'  # 3D SBDART LUTs (sza x cer x cot)
 RFOV_DIR = Path(f'{BASE_PATH}/project0904/RFOV_product/ocean_season')
-COT_EDGES = np.geomspace(2.5, 76, 17)
+MIN_COT = 2
+COT_EDGES = np.geomspace(MIN_COT, 76, 17)
 MIN_GROUP_SIZE = 5
 FIG_DIR = f'{BASE_PATH}/project0904/figs'
 os.makedirs(FIG_DIR, exist_ok=True)
 
-MIN_COT = 2.5
 MAIN_FACE_COLOR = (1, 1, 1, 1.0)
 
 
@@ -129,16 +129,18 @@ def draw_ac_cot_curves(ax, data):
         cot_bins, albedo_bins, albedo_std = bin_relation(cot, albedo, COT_EDGES)
         if len(cot_bins) < 3:
             continue
-        k_val, _, k_std, _ = fit_cot_albedo(cot_bins, albedo_bins)
+        k_val, lnb_val, _, _ = fit_cot_albedo(cot_bins, albedo_bins)
+        # Legend shows the fitted k and b (= exp(ln b)); uncertainties are
+        # deliberately omitted here.
         legend_labels.append(
-            rf'SZA={target_sza:.0f}°: $k$={k_val:.2f}$\pm${k_std:.2f}')
+            rf'SZA={target_sza:.0f}°: $k$={k_val:.2f}, '
+            rf'$b$={np.exp(lnb_val):.3f}')
         ax.plot(cot_bins, albedo_bins, lw=2, color=color,
                 label=f'SZA={target_sza:.0f}°')
 
     for line, label in zip(ax.lines, legend_labels):
         line.set_label(label)
 
-    # ax.set_xlim(2.5, 60)
     ax.set_xlabel('COT', fontsize=13)
     ax.set_ylabel(r'$A_{\mathrm{c}}$', fontsize=13)
     ax.legend(loc='best', fontsize=9, framealpha=0.9)
