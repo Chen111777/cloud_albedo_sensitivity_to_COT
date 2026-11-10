@@ -1,0 +1,586 @@
+# -*- coding: utf-8 -*-
+"""
+fig3_sbd_seasonal_k_8oceans.py
+Seasonal SBDART-derived COT-albedo relation (COT/SZA/CER from the L3 product).
+(A) fitted k parameter
+(B) fitted b parameter
+(C) Ratio of Ac(1-Ac)
+Fitted relation:
+    Ac = COT^k / (b + COT^k)
+Pre-correction references:
+    (1) k=1, b=0.15*/2/3^(-1/2)=0.1299
+    (2) k=1, b=0.15*/2=0.0750
+    (3) CERES-SSF Ac
+    (4) CERES-EBAF Ac
+    (5) Ac fixed at 0.38 (no COT-albedo relation).
+The last three are used only in panel (c), not to estimate or plot k or b.
+Sample screens: COT >= MIN_COT only, plus the SBDART-LUT domain (samples
+outside it get NaN Ac). A pure liquid-water screen (CERES liquid cloud
+fraction >= 0.99 x the CERES total cloud fraction of the same sample) is
+applied only to the CERES-SSF and CERES-EBAF baselines, so that those two
+original Ac values are pure-water albedos.
+"""
+from pathlib import Path
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import xarray as xr
+from matplotlib.colors import to_rgb
+from utils_fitting import cot_to_albedo, fit_cot_albedo, format_panel_tag, oceans
+BASE_DIR = Path(__file__).resolve().parent
+L3_DIR = BASE_DIR / 'L3_product'
+CERES_FILE = "/home/chenyiqi/251028_albedo_cot/CERES_EBAF_TOA_2020/CERES_EBAF-TOA_Ed4.2.1_Subset_202001-202012.nc"
+B_547 = 0.1299
+B_0 = 0.0750
+AC_FIXED_BEFORE6 = 0.38
+AC_METHODS = [
+    ("before-1", f"k=1, b={B_547:.4f}"),
+    ("before-2", f"k=1, b={B_0:.4f}"),
+    ("before-3", "CERES-SSF Ac"),
+    ("before-4", "CERES-EBAF Ac"),
+    ("before-5", f"Ac fixed at {AC_FIXED_BEFORE6:.2f}"),
+    ("corrected", "fitted k and ln b"),
+]
+OUTPUT_PATH = './figs/fig3_sbd_seasonal_3ratios_8oceans.png'
+CSV_PATH = './processed_data/fig3_sbd_seasonal_3ratios_8oceans.csv'
+AC_RATIO_OUTPUT_PATH = './figs/figsupp_sbd_seasonal_ac_ratio_8oceans.png'
+RATIO_COLS = ["ratio_547", "ratio_0", "ratio_ebaf", "ratio_ssf", "ratio_038"]
+AC_RATIO_COLS = [
+    "ratio_ac_547", "ratio_ac_0",
+    "ratio_ac_ebaf", "ratio_ac_ssf", "ratio_ac_038",
+]
+SBDART_LUT_FOLDER = 'gascp_aodcp_sfccp_sw'
+SEASONS = ('MAM','JJA','SON','DJF')
+EDGE_COLOR = "0.35"
+EDGE_WIDTH = 0.3
+MIN_COT = 2
+COT_EDGES = np.geomspace(MIN_COT,76,17)
+MIN_GROUP_SIZE = 5
+MAX_SZA = 70
+PURE_WATER_FRACTION = 0.99
+SEASON_COLORS = {
+    'MAM':'#4C78A8',
+    'JJA':'#F58518',
+    'SON':'#54A24B',
+    'DJF':'#B279A2'
+}
+def bar_shades(color, n, dark_max=0.4, light_max=0.47):
+    """Return n opaque shades of *color*, ordered from darker to lighter.
+    Instead of stacking transparent (alpha-blended) bars, the lightness of the
+    colour itself is changed: the shades left of the centre are darkened
+    towards black and the shades right of the centre are blended towards white.
+    Using opaque colours keeps the bars flat and print-friendly.
+    """
+    base = np.asarray(to_rgb(color), dtype=float)
+    centre = (n - 2) / 2.0
+    shades = []
+    for j in range(n):
+        t = (j - centre) / centre if centre else 0.0     # -1 (darkest) .. +1 (lightest)
+        if t < 0:
+            shades.append(tuple(np.clip(base * (1.0 + dark_max * t), 0.0, 1.0)))
+        else:
+            shades.append(tuple(np.clip(base + (1.0 - base) * light_max * t, 0.0, 1.0)))
+    return shades
+def draw_ratio_bars(ax, df, ratio_cols, group_centers):
+    """Grouped bars: one cluster per ocean, one sub-bar per season x method.
+    The colour of each sub-bar is the season colour shaded from darkest
+    (leftmost bar) to lightest (rightmost bar).
+    """
+    season_width = 0.90 / len(SEASONS)
+    sub_width = season_width / len(ratio_cols)
+    offsets = (np.arange(len(ratio_cols)) - (len(ratio_cols) - 1) / 2) * sub_width
+    group_shades = {
+        season: bar_shades(SEASON_COLORS[season], len(ratio_cols))
+        for season in SEASONS
+    }
+    for i, season in enumerate(SEASONS):
+        season_x = group_centers + (i - (len(SEASONS) - 1) / 2) * season_width
+        for j, col in enumerate(ratio_cols):
+            vals = []
+            for ocean in oceans:
+                row = df[(df.Ocean == ocean) & (df.Season == season)].iloc[0]
+                vals.append(row[col])
+            ax.bar(
+                season_x + offsets[j], vals,
+                width=sub_width * 0.98,
+                color=group_shades[season][j],
+                edgecolor=EDGE_COLOR,
+                linewidth=EDGE_WIDTH,
+                zorder=2,
+            )
+def add_ratio_legend(ax, ratio_labels, bbox, fontsize=10):
+    """Two-row legend without a title: seasons on top, methods below.
+    Matplotlib fills legend columns column-major, so the handles are
+    interleaved (season, method) and padded with one invisible handle to get
+    a seasons row above a methods row.
+    """
+    from matplotlib.patches import Patch
+    season_handles = [
+        Patch(facecolor=SEASON_COLORS[season], label=season,
+              edgecolor=EDGE_COLOR, linewidth=EDGE_WIDTH)
+        for season in SEASONS
+    ]
+    method_shades = bar_shades("#777777", len(ratio_labels))
+    method_handles = [
+        Patch(facecolor=method_shades[j], label=ratio_labels[j],
+              edgecolor=EDGE_COLOR, linewidth=EDGE_WIDTH)
+        for j in range(len(ratio_labels))
+    ]
+    blank_handle = Patch(facecolor="none", edgecolor="none", label="")
+    legend_handles = []
+    for j, method_handle in enumerate(method_handles):
+        legend_handles.append(
+            season_handles[j] if j < len(season_handles) else blank_handle
+        )
+        legend_handles.append(method_handle)
+    ax.legend(handles=legend_handles, ncol=len(method_handles), fontsize=fontsize,
+              frameon=False, loc="upper center", bbox_to_anchor=bbox,
+              handlelength=1.2, columnspacing=1.4)
+def style_ocean_axis(ax, group_centers):
+    """Apply the common ocean-bar axis style (grid, spines, ocean ticks)."""
+    ax.grid(axis="y", alpha=0.25, linewidth=0.6)
+    ax.set_axisbelow(True)
+    ax.tick_params(labelsize=9)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_linewidth(0.8)
+    ax.spines["bottom"].set_linewidth(0.8)
+    ax.set_xticks(group_centers)
+    ax.set_xticklabels(oceans, fontsize=10.5, ha="center")
+    ax.tick_params(axis="x", labelbottom=True, length=3.5)
+def load_ceres_ebaf_grid():
+    """Calculate monthly CERES-EBAF Ac from CERES TOA fluxes and CERES cloud fraction.
+    Ac = [SW_all - (1-CF)*SW_clear] / (CF * incoming solar flux).
+    Both the fluxes and the cloud area fraction (CF, in percent -> fraction)
+    are read directly from CERES_FILE, so no MODIS regridding is involved.
+    """
+    ds = xr.open_dataset(CERES_FILE)
+    cf = ds["cldarea_total_daynight_mon"] / 100.0
+    ac = (
+        ds["toa_sw_all_mon"] - (1.0 - cf) * ds["toa_sw_clr_c_mon"]
+    ) / cf / ds["solar_mon"]
+    ac = ac.where((cf > 0) & np.isfinite(ac) & (ac >= 0) & (ac <= 1))
+    result = ac.load()
+    ds.close()
+    return result
+def ceres_ssf_albedo(data):
+    """CERES-SSF Ac of the L3 samples (the 'albedo' of fig1_fitting_8oceans.py).
+    Ac = [SW_all - (1-CF)*SW_clear] / (CF * incoming solar flux), evaluated
+    sample by sample from the CERES SSF fluxes and cloud fraction stored in
+    L3_product. No cloud-phase or cloud-top-temperature screening is applied;
+    samples with CF <= 0 or Ac outside [0, 1] are returned as NaN.
+    """
+    required = {"sw_all", "sw_clr", "cf_ceres", "solar_incoming"}
+    missing = required.difference(data.columns)
+    if missing:
+        raise ValueError(
+            f"CERES-SSF Ac requires the L3 columns {sorted(missing)}, "
+            f"available: {list(data.columns)}"
+        )
+    cf = pd.to_numeric(data["cf_ceres"], errors="coerce")
+    sw_all = pd.to_numeric(data["sw_all"], errors="coerce")
+    sw_clr = pd.to_numeric(data["sw_clr"], errors="coerce")
+    solar = pd.to_numeric(data["solar_incoming"], errors="coerce")
+    ac = (sw_all - (1.0 - cf) * sw_clr) / cf / solar
+    ac = ac.where((cf > 0) & np.isfinite(ac) & (ac >= 0) & (ac <= 1))
+    return ac.to_numpy(dtype=float)
+def _find_column(data, candidates, description):
+    lower = {str(c).lower(): c for c in data.columns}
+    for name in candidates:
+        if name.lower() in lower:
+            return lower[name.lower()]
+    raise ValueError(
+        f"CERES-EBAF seasonal/regional matching requires a {description} column. "
+        f"Accepted names: {candidates}. Available columns: {list(data.columns)}"
+    )
+def match_ceres_ebaf_to_l3(data, ceres_ebaf_grid, season):
+    """Match CERES-EBAF Ac to L3 samples using latitude/longitude.
+    If the L3 CSV has a month/time column, use month-specific CERES-EBAF Ac.
+    Otherwise, use the seasonal mean of the relevant CERES months.
+    """
+    lat_col = _find_column(data, ["lat", "latitude"], "latitude")
+    lon_col = _find_column(data, ["lon", "longitude"], "longitude")
+    lower = {str(c).lower(): c for c in data.columns}
+    month_col = next(
+        (lower[name] for name in ["month", "time", "date", "year_month", "yyyymm"] if name in lower),
+        None,
+    )
+    lat = pd.to_numeric(data[lat_col], errors="coerce").to_numpy(float)
+    lon = pd.to_numeric(data[lon_col], errors="coerce").to_numpy(float)
+    lon = ((lon + 180.0) % 360.0) - 180.0
+    grid_lat = np.asarray(ceres_ebaf_grid.lat, dtype=float)
+    grid_lon = ((np.asarray(ceres_ebaf_grid.lon, dtype=float) + 180.0) % 360.0) - 180.0
+    lat_idx = np.abs(lat[:, None] - grid_lat[None, :]).argmin(axis=1)
+    lon_idx = np.abs(lon[:, None] - grid_lon[None, :]).argmin(axis=1)
+    ac_values = np.asarray(ceres_ebaf_grid.values)
+    if month_col is None:
+        season_months = {
+            "MAM": [3, 4, 5],
+            "JJA": [6, 7, 8],
+            "SON": [9, 10, 11],
+            "DJF": [12, 1, 2],
+        }[season]
+        time_months = pd.to_datetime(ceres_ebaf_grid.time.values).month
+        month_indices = np.flatnonzero(np.isin(time_months, season_months))
+        seasonal_grid = np.nanmean(ac_values[month_indices, :, :], axis=0)
+        return seasonal_grid[lat_idx, lon_idx]
+    values = data[month_col]
+    if np.issubdtype(values.dtype, np.number):
+        numeric = pd.to_numeric(values, errors="coerce")
+        month = np.where(numeric >= 10000, numeric % 100, numeric).astype(float)
+    else:
+        parsed = pd.to_datetime(values, errors="coerce")
+        month = parsed.dt.month.to_numpy(dtype=float)
+    time_months = pd.to_datetime(ceres_ebaf_grid.time.values).month
+    output = np.full(len(data), np.nan, dtype=float)
+    for i, m in enumerate(month):
+        if not np.isfinite(m) or m < 1 or m > 12:
+            continue
+        month_idx = np.flatnonzero(time_months == int(m))
+        if month_idx.size:
+            output[i] = ac_values[month_idx[0], lat_idx[i], lon_idx[i]]
+    return output
+def sensitivity_mean(cot, k, b):
+    cot = np.asarray(cot, dtype=float)
+    valid = np.isfinite(cot) & (cot > 0)
+    if not valid.any():
+        return np.nan
+    ac = b * cot[valid] ** k / (1.0 + b * cot[valid] ** k)
+    return float(np.nanmean(ac * (1.0 - ac)))
+def ocean_daytime_albedo(ocean,season,table_folder=SBDART_LUT_FOLDER,max_sza=MAX_SZA):
+    """SBDART-derived albedo from the L3 COT/SZA/CER samples.
+    COT, SZA and CER are read directly from
+    L3_product/{ocean}_{season}.csv; the albedo is looked up from the 3D
+    (cot x cer x sza) SBDART LUT.
+    """
+    file = L3_DIR / f'{ocean}_{season}.csv'
+    if not file.exists():
+        return None
+    data = pd.read_csv(file)
+    data = data[['cot','cer','sza']].dropna()
+    data = data[
+        (data.cot>=MIN_COT)
+        &
+        (data.cer>0)
+        &
+        (data.sza>0)
+        &
+        (data.sza<=max_sza)
+    ]
+    if len(data)==0:
+        return None
+    cot = data.cot.to_numpy(float)
+    cer = data.cer.to_numpy(float)
+    sza = data.sza.to_numpy(float)
+    albedo = cot_to_albedo(
+        cot,
+        'sbdart',
+        sza=sza,
+        cer=cer,
+        table_folder=table_folder,
+        ocean=ocean,
+        season=season
+    )
+    return cot,albedo
+def bin_relation(cot,albedo,edges):
+    labels = pd.cut(
+        cot,
+        edges,
+        labels=False,
+        include_lowest=True
+    )
+    cot_bins = []
+    alb_bins = []
+    for i in range(len(edges)-1):
+        mask = labels==i
+        if np.sum(mask)<MIN_GROUP_SIZE:
+            continue
+        cot_bins.append(
+            np.exp(
+                np.nanmean(
+                    np.log(cot[mask])
+                )
+            )
+        )
+        alb_bins.append(
+            np.nanmean(albedo[mask])
+        )
+    return np.asarray(cot_bins),np.asarray(alb_bins)
+def _mean_ac_sensitivity(ac):
+    """Mean Ac(1-Ac) over the finite Ac samples inside [0, 1]."""
+    values = np.asarray(ac, dtype=float)
+    values = values[np.isfinite(values) & (values >= 0) & (values <= 1)]
+    if not values.size:
+        return np.nan
+    return float(np.mean(values * (1.0 - values)))
+def _mean_ac(ac):
+    """Mean Ac over the finite samples inside [0, 1]."""
+    values = np.asarray(ac, dtype=float)
+    values = values[np.isfinite(values) & (values >= 0) & (values <= 1)]
+    if not values.size:
+        return np.nan
+    return float(np.mean(values))
+def mean_ac(cot, k, b):
+    """Mean Ac of the relation Ac = b*COT^k / (1 + b*COT^k) over valid COT."""
+    cot = np.asarray(cot, dtype=float)
+    valid = np.isfinite(cot) & (cot > 0)
+    if not valid.any():
+        return np.nan
+    cot_valid = cot[valid]
+    ac = b * cot_valid ** k / (1.0 + b * cot_valid ** k)
+    return float(np.nanmean(ac))
+def calc_ratio(k, lnb, cot, ceres_ebaf_ac, ceres_ssf_ac_values):
+    """Corrected sensitivity divided by six pre-correction baselines.
+    Order of the returned ratios: ratio_547, ratio_0,&#x20;
+    ratio_ebaf (CERES-EBAF), ratio_ssf (CERES-SSF), ratio_038.
+    """
+    if not np.isfinite(k) or not np.isfinite(lnb):
+        return (np.nan,) * 6
+    b_fit = np.exp(lnb)
+    corrected = sensitivity_mean(cot, k, b_fit)
+    before_547 = sensitivity_mean(cot, 1.0, B_547)
+    before_0 = sensitivity_mean(cot, 1.0, B_0)
+    before_fixed = AC_FIXED_BEFORE6 * (1.0 - AC_FIXED_BEFORE6)
+    ceres_ebaf_sens = _mean_ac_sensitivity(ceres_ebaf_ac)
+    ceres_ssf_sens = _mean_ac_sensitivity(ceres_ssf_ac_values)
+    return (
+        corrected / before_547 if before_547 > 0 else np.nan,
+        corrected / before_0 if before_0 > 0 else np.nan,
+        corrected / ceres_ebaf_sens if ceres_ebaf_sens > 0 else np.nan,
+        corrected / ceres_ssf_sens if ceres_ssf_sens > 0 else np.nan,
+        corrected / before_fixed if before_fixed > 0 else np.nan,
+    )
+def calc_ac_ratio(k, lnb, cot, ceres_ebaf_ac, ceres_ssf_ac_values):
+    """Corrected mean Ac divided by the five pre-correction mean-Ac baselines.
+    Same baselines and order as calc_ratio, but the ratio is formed from the
+    mean cloud albedo Ac itself (not from the sensitivity Ac(1-Ac)).
+    Order of the returned ratios: ratio_ac_547, ratio_ac_0,
+    ratio_ac_ebaf (CERES-EBAF), ratio_ac_ssf (CERES-SSF), ratio_ac_038.
+    """
+    if not np.isfinite(k) or not np.isfinite(lnb):
+        return (np.nan,) * 5
+    b_fit = np.exp(lnb)
+    corrected = mean_ac(cot, k, b_fit)
+    before_547 = mean_ac(cot, 1.0, B_547)
+    before_0 = mean_ac(cot, 1.0, B_0)
+    before_fixed = AC_FIXED_BEFORE6
+    ceres_ebaf_ac_mean = _mean_ac(ceres_ebaf_ac)
+    ceres_ssf_ac_mean = _mean_ac(ceres_ssf_ac_values)
+    return (
+        corrected / before_547 if before_547 > 0 else np.nan,
+        corrected / before_0 if before_0 > 0 else np.nan,
+        corrected / ceres_ebaf_ac_mean if ceres_ebaf_ac_mean > 0 else np.nan,
+        corrected / ceres_ssf_ac_mean if ceres_ssf_ac_mean > 0 else np.nan,
+        corrected / before_fixed if before_fixed > 0 else np.nan,
+    )
+def accumulate_ac_stats(acc, method, ac):
+    """Pool one ocean-season set of Ac samples into the global accumulator."""
+    ac = np.asarray(ac, dtype=float)
+    ac = ac[np.isfinite(ac) & (ac >= 0) & (ac <= 1)]
+    if not ac.size:
+        return
+    entry = acc.setdefault(method, {"sum_ac": 0.0, "sum_prod": 0.0, "n": 0})
+    entry["sum_ac"] += float(np.sum(ac))
+    entry["sum_prod"] += float(np.sum(ac * (1.0 - ac)))
+    entry["n"] += int(ac.size)
+def print_global_ac_stats(acc):
+    """Print global-mean Ac and Ac(1-Ac) for every method.
+    All valid L3 samples of all ocean-season pairs contribute with equal
+    weight, i.e. the statistics are pooled over samples (not averaged over
+    the 32 ocean-season means).
+    """
+    print("\nGlobal-mean Ac and Ac(1-Ac) over all ocean-season samples:")
+    for method, label in AC_METHODS:
+        entry = acc.get(method)
+        if entry is None or entry["n"] == 0:
+            print(f"     {method:<10s} ({label}): Ac=nan, Ac(1-Ac)=nan (N=0)")
+            continue
+        n = entry["n"]
+        print(
+            f"     {method:<10s} ({label}): "
+            f"Ac={entry['sum_ac'] / n:.4f}, "
+            f"Ac(1-Ac)={entry['sum_prod'] / n:.4f} (N={n})"
+        )
+def empty_record(ocean, season):
+    """Record of one ocean-season pair with every statistic set to NaN."""
+    record = {
+        "Ocean": ocean, "Season": season,
+        "k_fit": np.nan, "k_fit_std": np.nan,
+        "lnb_fit": np.nan, "lnb_fit_std": np.nan,
+    }
+    for col in RATIO_COLS + AC_RATIO_COLS:
+        record[col] = np.nan
+    return record
+def main():
+    ceres_ebaf_grid = load_ceres_ebaf_grid()
+    records = []
+    ac_stats = {}
+    for ocean in oceans:
+        for season in SEASONS:
+            print(f"Processing {ocean}-{season}")
+            file = L3_DIR / f"{ocean}_{season}.csv"
+            if not file.exists():
+                records.append(empty_record(ocean, season))
+                continue
+            data = pd.read_csv(file)
+            required = {"cot", "cer", "sza", "cf_ceres", "cf_liq_ceres"}
+            if not required.issubset(data.columns):
+                raise ValueError(f"{file} must contain {sorted(required)}")
+            data = data[data.cot >= MIN_COT].copy()
+            if data.empty:
+                records.append(empty_record(ocean, season))
+                continue
+            cot = data.cot.to_numpy(float)
+            albedo_sbd = cot_to_albedo(
+                cot, "sbdart",
+                sza=data.sza.to_numpy(float),
+                cer=data.cer.to_numpy(float),
+                table_folder=SBDART_LUT_FOLDER,
+                ocean=ocean, season=season,
+            )
+            cf_ceres = data.cf_ceres.to_numpy(float)
+            cf_liq_ceres = data.cf_liq_ceres.to_numpy(float)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                cf_liq_frac = np.where(
+                    cf_ceres > 0, cf_liq_ceres / cf_ceres, np.nan
+                )
+            pure_water = np.isfinite(cf_liq_frac) & (cf_liq_frac >= PURE_WATER_FRACTION)
+            valid_sbd = np.isfinite(cot) & np.isfinite(albedo_sbd)
+            valid_ceres = valid_sbd & pure_water
+            cot_sbd = cot[valid_sbd]
+            albedo_sbd = np.asarray(albedo_sbd, dtype=float)[valid_sbd]
+            cot_bins, alb_bins = bin_relation(cot_sbd, albedo_sbd, COT_EDGES)
+            if len(cot_bins) >= 3:
+                k_fit, lnb_fit, k_fit_std, lnb_fit_std = fit_cot_albedo(cot_bins, alb_bins)
+            else:
+                k_fit = lnb_fit = k_fit_std = lnb_fit_std = np.nan
+            ceres_ssf_ac_all = ceres_ssf_albedo(data)
+            ceres_ssf_ac = ceres_ssf_ac_all[valid_ceres]
+            ceres_ebaf_ac_all = match_ceres_ebaf_to_l3(data, ceres_ebaf_grid, season)
+            ceres_ebaf_ac = (
+                ceres_ebaf_ac_all[valid_ceres]
+                if len(ceres_ebaf_ac_all) == len(valid_ceres)
+                else ceres_ebaf_ac_all
+            )
+            ratio_547, ratio_0, ratio_ebaf, ratio_ssf, ratio_038 = calc_ratio(
+                k_fit, lnb_fit, cot_sbd, ceres_ebaf_ac, ceres_ssf_ac
+            )
+            (
+                ratio_ac_547, ratio_ac_0, ratio_ac_ebaf,
+                ratio_ac_ssf, ratio_ac_038,
+            ) = calc_ac_ratio(k_fit, lnb_fit, cot_sbd, ceres_ebaf_ac, ceres_ssf_ac)
+            cot_pos = np.asarray(cot_sbd, dtype=float)
+            if not cot_pos.size:
+                print(f"     [{ocean}-{season}] no valid COT sample, skip Ac statistics")
+            ac_samples = {
+                "before-1": B_547 * cot_pos / (1.0 + B_547 * cot_pos),
+                "before-2": B_0 * cot_pos / (1.0 + B_0 * cot_pos),
+                "before-3": ceres_ssf_ac,
+                "before-4": ceres_ebaf_ac,
+                "before-5": np.full(cot_pos.shape, AC_FIXED_BEFORE6, dtype=float),
+            }
+            if np.isfinite(k_fit) and np.isfinite(lnb_fit):
+                b_fit = float(np.exp(lnb_fit))
+                ac_samples["corrected"] = (
+                    b_fit * cot_pos**k_fit / (1.0 + b_fit * cot_pos**k_fit)
+                )
+            for method, ac in ac_samples.items():
+                accumulate_ac_stats(ac_stats, method, ac)
+            records.append({
+                "Ocean": ocean, "Season": season,
+                "k_fit": k_fit, "k_fit_std": k_fit_std,
+                "lnb_fit": lnb_fit, "lnb_fit_std": lnb_fit_std,
+                "b_fit": np.exp(lnb_fit) if np.isfinite(lnb_fit) else np.nan,
+                "ratio_547": ratio_547, "ratio_0": ratio_0,
+                "ratio_ebaf": ratio_ebaf,
+                "ratio_ssf": ratio_ssf, "ratio_038": ratio_038,
+                "ratio_ac_547": ratio_ac_547, "ratio_ac_0": ratio_ac_0,
+                "ratio_ac_ebaf": ratio_ac_ebaf,
+                "ratio_ac_ssf": ratio_ac_ssf, "ratio_ac_038": ratio_ac_038,
+            })
+    df = pd.DataFrame(records)
+    Path(CSV_PATH).parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(CSV_PATH, index=False)
+    print_global_ac_stats(ac_stats)
+    fig, axes = plt.subplots(3, 1, figsize=(9.8, 8), sharex=True)
+    ax1, ax2, ax3 = axes
+    x = np.arange(len(oceans))
+    width = 0.18
+    group_centers = x + (len(SEASONS) - 1) * width / 2
+    for i, season in enumerate(SEASONS):
+        vals, errs = [], []
+        for ocean in oceans:
+            row = df[(df.Ocean == ocean) & (df.Season == season)].iloc[0]
+            vals.append(row.k_fit)
+            errs.append(row.k_fit_std)
+        xpos = x + i * width
+        ax1.bar(
+            xpos, vals, width=width, yerr=errs, capsize=2,
+            color=SEASON_COLORS[season], edgecolor=EDGE_COLOR,
+            linewidth=EDGE_WIDTH,
+            error_kw={"elinewidth": 0.7, "capthick": 0.7},
+            label=season, zorder=2,
+        )
+    ax1.axhline(1.0, color="black", linestyle="--", linewidth=1)
+    ax1.set_ylabel(r"$k$", fontsize=12)
+    ax1.set_ylim(0, 1.1)
+    ax1.text(-0.055, 1.04, format_panel_tag(0, "science"),
+              transform=ax1.transAxes, fontsize=14, va="top", ha="right")
+    ax1.legend(ncol=4, fontsize=10, frameon=False, loc="upper center",
+                bbox_to_anchor=(0.5, 1.08))
+    for i, season in enumerate(SEASONS):
+        vals, errs = [], []
+        for ocean in oceans:
+            row = df[(df.Ocean == ocean) & (df.Season == season)].iloc[0]
+            vals.append(row.b_fit)
+            errs.append(row.b_fit * row.lnb_fit_std)
+        xpos = x + i * width
+        ax2.bar(
+            xpos, vals, width=width, yerr=errs, capsize=2,
+            color=SEASON_COLORS[season], edgecolor=EDGE_COLOR,
+            linewidth=EDGE_WIDTH,
+            error_kw={"elinewidth": 0.7, "capthick": 0.7},
+            zorder=2,
+        )
+    ax2.set_ylabel(r"$b$", fontsize=12)
+    ax2.set_ylim(bottom=0)
+    ax2.text(-0.055, 1.04, format_panel_tag(1, "science"),
+              transform=ax2.transAxes, fontsize=14, va="top", ha="right")
+    ratio_cols = RATIO_COLS
+    ratio_labels = [
+        r"547deg",
+        r"0deg",
+        r"EBAF",
+        r"SSF",
+        r"038",
+    ]
+    draw_ratio_bars(ax3, df, ratio_cols, group_centers)
+    ax3.axhline(1.0, color="black", linestyle="--", linewidth=1)
+    ax3.set_ylabel(r"$R_i=\dfrac{A_{\mathrm{c,corr}}(1-A_{\mathrm{c,corr}})}{A_{\mathrm{c,}i}(1-A_{\mathrm{c,}i})}$", fontsize=11)
+    ax3.text(-0.055, 1.19, format_panel_tag(2, "science"),
+              transform=ax3.transAxes, fontsize=14, va="top", ha="right")
+    add_ratio_legend(ax3, ratio_labels, bbox=(0.5, 1.27), fontsize=10)
+    for ax in axes:
+        style_ocean_axis(ax, group_centers)
+    fig.tight_layout(h_pad=1.0)
+    pos_b = ax2.get_position()
+    ax2.set_position([pos_b.x0, pos_b.y0 + 0.03,
+                      pos_b.width, pos_b.height])
+    Path(OUTPUT_PATH).parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(OUTPUT_PATH, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print("Saved:", OUTPUT_PATH)
+    print("Saved:", CSV_PATH)
+    fig_ac, ax_ac = plt.subplots(figsize=(9.8, 3.6))
+    draw_ratio_bars(ax_ac, df, AC_RATIO_COLS, group_centers)
+    ax_ac.axhline(1.0, color="black", linestyle="--", linewidth=1)
+    ax_ac.set_ylabel(r"Corrected / original $A_c$", fontsize=11)
+    add_ratio_legend(ax_ac, ratio_labels, bbox=(0.5, 1.18), fontsize=10)
+    style_ocean_axis(ax_ac, group_centers)
+    fig_ac.tight_layout()
+    Path(AC_RATIO_OUTPUT_PATH).parent.mkdir(parents=True, exist_ok=True)
+    fig_ac.savefig(AC_RATIO_OUTPUT_PATH, dpi=300, bbox_inches="tight")
+    plt.close(fig_ac)
+    print("Saved:", AC_RATIO_OUTPUT_PATH)
+if __name__ == '__main__':
+    main()
