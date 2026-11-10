@@ -3,7 +3,7 @@
 Plot grid-level time means of selected variables.
 
 Variables:
-    1. swdown
+    1. swtoa
     2. log_aod_diff
     3. cf_liq_ceres
     4. cot_mod08
@@ -48,9 +48,9 @@ MAP_EXTENT = [-180, 180, -60, 60]
 
 VAR_INFO = [
     {
-        'name': 'swdown',
-        'title': r'SW$_\mathrm{down}$',
-        'cbar_label': r'SW$_\mathrm{down}$ (W m$^{-2}$)',
+        'name': 'swtoa',
+        'title': r'SW$_\mathrm{TOA}$',
+        'cbar_label': r'SW$_\mathrm{TOA}$ (W m$^{-2}$)',
         'cmap': 'YlOrRd',
         'robust': True,
     },
@@ -63,8 +63,8 @@ VAR_INFO = [
     },
     {
         'name': 'cf_liq_ceres',
-        'title': r'CF$_\mathrm{msk}$',
-        'cbar_label': r'CF$_\mathrm{msk}$',
+        'title': r'CF',
+        'cbar_label': r'CF',
         'cmap': 'Blues',
         'robust': False,
         'vmin': 0,
@@ -107,19 +107,21 @@ def load_global_data():
     return pd.concat(frames, ignore_index=True)
 
 
-def add_swdown(data):
+def add_swtoa(data):
     """Compute monthly incoming shortwave flux by latitude and month."""
     if 'time' not in data.columns:
-        raise KeyError("Column 'time' is required to compute swdown.")
+        raise KeyError("Column 'time' is required to compute swtoa.")
 
     data = data.copy()
     data['month'] = pd.to_datetime(data['time']).dt.month
 
     unique_lat_month = data[['lat', 'month']].drop_duplicates().copy()
-    unique_lat_month['swdown'] = unique_lat_month.apply(
-        lambda row: calc_monthly_swdown(row['lat'], month=row['month']),
-        axis=1,
-    )
+    # Explicit Python scalars: pandas would otherwise promote the row Series to
+    # float64 and pass a numpy float as ``month``.
+    unique_lat_month['swtoa'] = [
+        calc_monthly_swdown(float(lat), month=int(month))
+        for lat, month in zip(unique_lat_month['lat'], unique_lat_month['month'])
+    ]
 
     return data.merge(unique_lat_month, on=['lat', 'month'], how='left')
 
@@ -285,8 +287,8 @@ def main():
     print(f'Loading merged data from {MERGED_DATA_DIR}...')
     data = load_global_data()
 
-    print('Computing swdown...')
-    data = add_swdown(data)
+    print('Computing swtoa...')
+    data = add_swtoa(data)
 
     print('Computing grid-cell time means...')
     grid_mean = compute_grid_means(data)
