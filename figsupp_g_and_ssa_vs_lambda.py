@@ -155,17 +155,18 @@ for color, d in zip(colors, diameters):
     axes[1].plot(wavelengths, results[d]["ssa"], color=color, lw=1.5,
                  label=fr"$d={d:.0f}\ \mu$m")
 
-# Mark approximate spectral regions used in the original figure.
+# Mark the visible/UV spectral boundaries used in the original figure.
 for ax in axes:
-    for xline, color in [(0.3, "gray"), (0.4, "tab:red"),
-                         (0.7, "tab:red"), (5.0, "gray")]:
-        ax.axvline(xline, color=color, ls="--", lw=0.9, alpha=0.7)
-    ax.set_xlim(0.2, 6.0)
+    for xline in (0.4, 0.7):
+        ax.axvline(xline, color="tab:red", ls="--", lw=0.9, alpha=0.7)
+    ax.set_xlim(0.3, 5.0)
     ax.set_xlabel(r"$\lambda$ ($\mu$m)")
     ax.grid(True, alpha=0.25)
 
 axes[0].set_ylabel(r"$g$")
 axes[0].set_ylim(0, 1)
+# Gridlines / tick labels of panel (a) at 0.05, 0.25, 0.45, 0.65, 0.85.
+axes[0].set_yticks(np.arange(0.05, 0.90, 0.20))
 axes[0].legend(frameon=False, loc="best")
 
 axes[1].set_ylabel(r"$\omega_0$")
