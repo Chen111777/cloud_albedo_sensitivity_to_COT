@@ -150,9 +150,9 @@ fig, axes = plt.subplots(1, 2, figsize=(8.5, 4.2), sharex=True)
 colors = ["tab:blue", "tab:orange", "tab:green"]
 
 for color, d in zip(colors, diameters):
-    axes[0].plot(wavelengths, results[d]["g"], color=color, lw=1.5,
+    axes[1].plot(wavelengths, results[d]["g"], color=color, lw=1.5,
                  label=fr"$d={d:.0f}\ \mu$m")
-    axes[1].plot(wavelengths, results[d]["ssa"], color=color, lw=1.5,
+    axes[0].plot(wavelengths, results[d]["ssa"], color=color, lw=1.5,
                  label=fr"$d={d:.0f}\ \mu$m")
 
 # Mark the visible/UV spectral boundaries used in the original figure.
@@ -163,15 +163,15 @@ for ax in axes:
     ax.set_xlabel(r"$\lambda$ ($\mu$m)")
     ax.grid(True, alpha=0.25)
 
-axes[0].set_ylabel(r"$g$")
-axes[0].set_ylim(0, 1)
+axes[1].set_ylabel(r"$g$")
+axes[1].set_ylim(0, 1)
 # Gridlines / tick labels of panel (a) at 0.05, 0.25, 0.45, 0.65, 0.85.
-axes[0].set_yticks(np.arange(0.05, 0.90, 0.20))
-axes[0].legend(frameon=False, loc="best")
+axes[1].set_yticks(np.arange(0.05, 0.90, 0.20))
+axes[1].legend(frameon=False, loc="best")
 
-axes[1].set_ylabel(r"$\omega_0$")
-axes[1].set_ylim(0, 1.02)
-axes[1].legend(frameon=False, loc="lower left")
+axes[0].set_ylabel(r"$\omega_0$")
+axes[0].set_ylim(0, 1.02)
+axes[0].legend(frameon=False, loc="best")
 
 # Panel tags (A, B, ...) in the same style as the other figures of this study.
 for panel_index, ax in enumerate(axes):
