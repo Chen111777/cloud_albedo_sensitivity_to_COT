@@ -158,7 +158,7 @@ def main():
 
     draw_ac_cot_curves(ax, data)
 
-    out_path = os.path.join(FIG_DIR, 'figsupp_sza_k_relation.png')
+    out_path = os.path.join(FIG_DIR, 'figsupp_sza_impact_k_b.png')
     save_png(fig, out_path, dpi=300)
     plt.close(fig)
     print(f'Saved: {out_path}')
