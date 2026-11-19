@@ -24,8 +24,8 @@ DATA_DIR = next(
 RFOV_DIR = DATA_DIR / 'RFOV_product' / 'ocean_season'
 SBDART_LUT_FOLDER = 'gascp_aodcp_sfccp_sw'
 FIG_DIR = BASE_DIR / 'figs'
-OUTPUT_PATH = FIG_DIR / 'fig1_fittings_ocean.png'
-LINEAR_OUTPUT_PATH = FIG_DIR / 'figsupp_fittings_ocean_linear.png'
+OUTPUT_PATH = FIG_DIR / 'fig1_fittings_global.png'
+LINEAR_OUTPUT_PATH = FIG_DIR / 'figsupp_fittings_global_linear.png'
 SEASONAL_OUTPUT_PATH = FIG_DIR / 'fig1_fittings_ocean_season.png'
 SEASONAL_LINEAR_OUTPUT_PATH = FIG_DIR / 'figsupp_fittings_ocean_season_linear.png'
 CSV_PATH = BASE_DIR / 'processed_data' / 'fig1_fitting_8oceans_k.csv'
@@ -181,24 +181,18 @@ def draw_ocean(ax, title, panel, linear=False):
     else:
         ax.set(xlim=(0, 60), ylim=(0.1, 0.95), title=title)
     ax.grid(alpha=0.25)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
+    # ax.spines['top'].set_visible(False)
+    # ax.spines['right'].set_visible(False)
     ax.tick_params(labelsize=7)
     ax.legend(loc='lower right', fontsize=8, framealpha=0.65)
 
 
 def make_figure(panels, linear=False):
-    fig, axes = plt.subplots(3, 3, figsize=(9, 8), sharex=True, sharey=True)
-    for row, ocean_row in enumerate(LAYOUT):
-        for column, ocean in enumerate(ocean_row):
-            ax = axes[row, column]
-            draw_ocean(ax, ocean, panels[ocean], linear)
-            ax.text(-0.03, 1.01, format_panel_tag(row * 3 + column, 'science'),
-                    transform=ax.transAxes, fontsize=12, va='bottom', ha='left')
-            if row == 2:
-                ax.set_xlabel(r'$\ln(\mathrm{COT})$' if linear else 'COT', fontsize=11)
-            if column == 0:
-                ax.set_ylabel(r'$\ln[A_c/(1-A_c)]$' if linear else r'$A_c$', fontsize=11)
+    # Main-text annual figure: retain only the pooled-ocean result.
+    fig, ax = plt.subplots(1, 1, figsize=(3.5, 3), sharex=True, sharey=True)
+    draw_ocean(ax, '', panels['Global'], linear)
+    ax.set_xlabel(r'$\ln(\mathrm{COT})$' if linear else 'COT', fontsize=11)
+    ax.set_ylabel(r'$\ln[A_c/(1-A_c)]$' if linear else r'$A_c$', fontsize=11)
     fig.tight_layout()
     FIG_DIR.mkdir(exist_ok=True, parents=True)
     output = LINEAR_OUTPUT_PATH if linear else OUTPUT_PATH
