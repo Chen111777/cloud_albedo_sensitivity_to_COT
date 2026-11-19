@@ -7,7 +7,8 @@ Seasonal SBDART-derived COT-albedo relation (COT/SZA/CER from the L3 product).
 (C) Ratio of Ac(1-Ac)
 Fitted relation:
     Ac = COT^k / (b + COT^k)
-Pre-correction references:
+Baselines (before-1 ... before-5) of panel (c); the reference albedo is the
+fitted relation:
     (1) k=1, b=0.15*/2/3^(-1/2)=0.1299
     (2) k=1, b=0.15*/2=0.0750
     (3) CERES-SSF Ac
@@ -39,10 +40,13 @@ AC_METHODS = [
     ("before-3", "CERES-SSF Ac"),
     ("before-4", "CERES-EBAF Ac"),
     ("before-5", f"Ac fixed at {AC_FIXED_BEFORE6:.2f}"),
-    ("corrected", "fitted k and ln b"),
+    ("reference", "fitted k and ln b"),
 ]
 OUTPUT_PATH = './figs/fig3_sbd_seasonal_3ratios_8oceans.png'
 CSV_PATH = './processed_data/fig3_sbd_seasonal_3ratios_8oceans.csv'
+MC_CSV_PATH = str(BASE_DIR / 'processed_data' / 'fig3_sbd_seasonal_3ratios_8oceans_mc.csv')
+N_BOOTSTRAP = 2000
+BOOTSTRAP_SEED = 20261114
 AC_RATIO_OUTPUT_PATH = './figs/figsupp_sbd_seasonal_ac_ratio_8oceans.png'
 RATIO_COLS = ["ratio_547", "ratio_0", "ratio_ebaf", "ratio_ssf", "ratio_038"]
 AC_RATIO_COLS = [
@@ -108,6 +112,16 @@ def draw_ratio_bars(ax, df, ratio_cols, group_centers):
                 linewidth=EDGE_WIDTH,
                 zorder=2,
             )
+            if f"{col}_std" in df.columns:
+                errors = []
+                for ocean in oceans:
+                    row = df[(df.Ocean == ocean) & (df.Season == season)].iloc[0]
+                    errors.append(row[f"{col}_std"])
+                ax.errorbar(
+                    season_x + offsets[j], vals, yerr=errors,
+                    fmt="none", ecolor="black", elinewidth=0.35,
+                    capsize=0.8, capthick=0.35, zorder=4,
+                )
 def add_ratio_legend(ax, ratio_labels, bbox, fontsize=10):
     """Two-row legend without a title: seasons on top, methods below.
     Matplotlib fills legend columns column-major, so the handles are
@@ -330,28 +344,83 @@ def mean_ac(cot, k, b):
     ac = b * cot_valid ** k / (1.0 + b * cot_valid ** k)
     return float(np.nanmean(ac))
 def calc_ratio(k, lnb, cot, ceres_ebaf_ac, ceres_ssf_ac_values):
-    """Corrected sensitivity divided by six pre-correction baselines.
+    """Reference sensitivity divided by the six baselines.
     Order of the returned ratios: ratio_547, ratio_0,&#x20;
     ratio_ebaf (CERES-EBAF), ratio_ssf (CERES-SSF), ratio_038.
     """
     if not np.isfinite(k) or not np.isfinite(lnb):
         return (np.nan,) * 6
     b_fit = np.exp(lnb)
-    corrected = sensitivity_mean(cot, k, b_fit)
+    reference = sensitivity_mean(cot, k, b_fit)
     before_547 = sensitivity_mean(cot, 1.0, B_547)
     before_0 = sensitivity_mean(cot, 1.0, B_0)
     before_fixed = AC_FIXED_BEFORE6 * (1.0 - AC_FIXED_BEFORE6)
     ceres_ebaf_sens = _mean_ac_sensitivity(ceres_ebaf_ac)
     ceres_ssf_sens = _mean_ac_sensitivity(ceres_ssf_ac_values)
     return (
-        corrected / before_547 if before_547 > 0 else np.nan,
-        corrected / before_0 if before_0 > 0 else np.nan,
-        corrected / ceres_ebaf_sens if ceres_ebaf_sens > 0 else np.nan,
-        corrected / ceres_ssf_sens if ceres_ssf_sens > 0 else np.nan,
-        corrected / before_fixed if before_fixed > 0 else np.nan,
+        reference / before_547 if before_547 > 0 else np.nan,
+        reference / before_0 if before_0 > 0 else np.nan,
+        reference / ceres_ebaf_sens if ceres_ebaf_sens > 0 else np.nan,
+        reference / ceres_ssf_sens if ceres_ssf_sens > 0 else np.nan,
+        reference / before_fixed if before_fixed > 0 else np.nan,
     )
+
+def bootstrap_reference_uncertainty(cot_bins, alb_bins, cot_samples,
+                                    ceres_ebaf_ac, ceres_ssf_ac,
+                                    ocean, season):
+    """Bootstrap fitted binned relationships and propagate to Ac_ref and R_i.
+
+    Resampling binned COT-albedo pairs preserves the fitted k-ln(b) covariance.
+    Baseline albedos are held fixed; only the reference fitted relationship varies.
+    """
+    rng_seed = BOOTSTRAP_SEED + sum(map(ord, ocean + season))
+    rng = np.random.default_rng(rng_seed)
+    n_bins = len(cot_bins)
+    ratio_draws = {col: [] for col in RATIO_COLS}
+    kratio_draws = {f"kratio_{col.split('_', 1)[1]}": [] for col in RATIO_COLS}
+    ac_ref_draws = []
+    for _ in range(N_BOOTSTRAP):
+        indices = rng.integers(0, n_bins, size=n_bins)
+        try:
+            k_draw, lnb_draw, _, _ = fit_cot_albedo(
+                np.asarray(cot_bins)[indices], np.asarray(alb_bins)[indices]
+            )
+        except Exception:
+            continue
+        if not (np.isfinite(k_draw) and np.isfinite(lnb_draw)):
+            continue
+        ratios = calc_ratio(k_draw, lnb_draw, cot_samples,
+                            ceres_ebaf_ac, ceres_ssf_ac)
+        ac_ref_draws.append(mean_ac(cot_samples, k_draw, np.exp(lnb_draw)))
+        for col, value in zip(RATIO_COLS, ratios):
+            ratio_draws[col].append(value if np.isfinite(value) else np.nan)
+            kratio_draws[f"kratio_{col.split('_', 1)[1]}"].append(
+                k_draw * value if np.isfinite(value) else np.nan
+            )
+    summary = {}
+    for col, values in ratio_draws.items():
+        arr = np.asarray(values, dtype=float)
+        arr = arr[np.isfinite(arr)]
+        summary[f"{col}_std"] = float(np.std(arr, ddof=1)) if arr.size > 1 else np.nan
+        summary[f"{col}_p05"] = float(np.quantile(arr, 0.05)) if arr.size else np.nan
+        summary[f"{col}_p95"] = float(np.quantile(arr, 0.95)) if arr.size else np.nan
+    ac_arr = np.asarray(ac_ref_draws, dtype=float)
+    ac_arr = ac_arr[np.isfinite(ac_arr)]
+    summary["ac_ref_mean"] = float(np.mean(ac_arr)) if ac_arr.size else np.nan
+    summary["ac_ref_std"] = float(np.std(ac_arr, ddof=1)) if ac_arr.size > 1 else np.nan
+    summary["ac_ref_p05"] = float(np.quantile(ac_arr, 0.05)) if ac_arr.size else np.nan
+    summary["ac_ref_p95"] = float(np.quantile(ac_arr, 0.95)) if ac_arr.size else np.nan
+    # Return draw-wise k*R values, retaining the covariance induced by the same fit.
+    draw_frame = pd.DataFrame({
+        key: pd.Series(values) for key, values in kratio_draws.items()
+    })
+    draw_frame.insert(0, "draw", np.arange(len(draw_frame)))
+    draw_frame.insert(0, "Season", season)
+    draw_frame.insert(0, "Ocean", ocean)
+    return summary, draw_frame
+
 def calc_ac_ratio(k, lnb, cot, ceres_ebaf_ac, ceres_ssf_ac_values):
-    """Corrected mean Ac divided by the five pre-correction mean-Ac baselines.
+    """Reference mean Ac divided by the five mean-Ac baselines.
     Same baselines and order as calc_ratio, but the ratio is formed from the
     mean cloud albedo Ac itself (not from the sensitivity Ac(1-Ac)).
     Order of the returned ratios: ratio_ac_547, ratio_ac_0,
@@ -360,18 +429,18 @@ def calc_ac_ratio(k, lnb, cot, ceres_ebaf_ac, ceres_ssf_ac_values):
     if not np.isfinite(k) or not np.isfinite(lnb):
         return (np.nan,) * 5
     b_fit = np.exp(lnb)
-    corrected = mean_ac(cot, k, b_fit)
+    reference = mean_ac(cot, k, b_fit)
     before_547 = mean_ac(cot, 1.0, B_547)
     before_0 = mean_ac(cot, 1.0, B_0)
     before_fixed = AC_FIXED_BEFORE6
     ceres_ebaf_ac_mean = _mean_ac(ceres_ebaf_ac)
     ceres_ssf_ac_mean = _mean_ac(ceres_ssf_ac_values)
     return (
-        corrected / before_547 if before_547 > 0 else np.nan,
-        corrected / before_0 if before_0 > 0 else np.nan,
-        corrected / ceres_ebaf_ac_mean if ceres_ebaf_ac_mean > 0 else np.nan,
-        corrected / ceres_ssf_ac_mean if ceres_ssf_ac_mean > 0 else np.nan,
-        corrected / before_fixed if before_fixed > 0 else np.nan,
+        reference / before_547 if before_547 > 0 else np.nan,
+        reference / before_0 if before_0 > 0 else np.nan,
+        reference / ceres_ebaf_ac_mean if ceres_ebaf_ac_mean > 0 else np.nan,
+        reference / ceres_ssf_ac_mean if ceres_ssf_ac_mean > 0 else np.nan,
+        reference / before_fixed if before_fixed > 0 else np.nan,
     )
 def accumulate_ac_stats(acc, method, ac):
     """Pool one ocean-season set of Ac samples into the global accumulator."""
@@ -410,10 +479,17 @@ def empty_record(ocean, season):
     }
     for col in RATIO_COLS + AC_RATIO_COLS:
         record[col] = np.nan
+    for col in RATIO_COLS:
+        record[f"{col}_std"] = np.nan
+        record[f"{col}_p05"] = np.nan
+        record[f"{col}_p95"] = np.nan
+    for col in ("ac_ref_fit", "ac_ref_mean", "ac_ref_std", "ac_ref_p05", "ac_ref_p95"):
+        record[col] = np.nan
     return record
 def main():
     ceres_ebaf_grid = load_ceres_ebaf_grid()
     records = []
+    mc_records = []
     ac_stats = {}
     for ocean in oceans:
         for season in SEASONS:
@@ -465,6 +541,12 @@ def main():
             ratio_547, ratio_0, ratio_ebaf, ratio_ssf, ratio_038 = calc_ratio(
                 k_fit, lnb_fit, cot_sbd, ceres_ebaf_ac, ceres_ssf_ac
             )
+            uncertainty_summary, mc_frame = bootstrap_reference_uncertainty(
+                cot_bins, alb_bins, cot_sbd, ceres_ebaf_ac, ceres_ssf_ac,
+                ocean, season
+            ) if len(cot_bins) >= 3 else ({}, pd.DataFrame())
+            if not mc_frame.empty:
+                mc_records.append(mc_frame)
             (
                 ratio_ac_547, ratio_ac_0, ratio_ac_ebaf,
                 ratio_ac_ssf, ratio_ac_038,
@@ -481,7 +563,7 @@ def main():
             }
             if np.isfinite(k_fit) and np.isfinite(lnb_fit):
                 b_fit = float(np.exp(lnb_fit))
-                ac_samples["corrected"] = (
+                ac_samples["reference"] = (
                     b_fit * cot_pos**k_fit / (1.0 + b_fit * cot_pos**k_fit)
                 )
             for method, ac in ac_samples.items():
@@ -497,10 +579,16 @@ def main():
                 "ratio_ac_547": ratio_ac_547, "ratio_ac_0": ratio_ac_0,
                 "ratio_ac_ebaf": ratio_ac_ebaf,
                 "ratio_ac_ssf": ratio_ac_ssf, "ratio_ac_038": ratio_ac_038,
+                "ac_ref_fit": mean_ac(
+                    cot_sbd, k_fit, np.exp(lnb_fit)
+                ) if np.isfinite(k_fit) and np.isfinite(lnb_fit) else np.nan,
+                **uncertainty_summary,
             })
     df = pd.DataFrame(records)
     Path(CSV_PATH).parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(CSV_PATH, index=False)
+    if mc_records:
+        pd.concat(mc_records, ignore_index=True).to_csv(MC_CSV_PATH, index=False)
     print_global_ac_stats(ac_stats)
     fig, axes = plt.subplots(3, 1, figsize=(9.8, 8), sharex=True)
     ax1, ax2, ax3 = axes
@@ -556,7 +644,7 @@ def main():
     ]
     draw_ratio_bars(ax3, df, ratio_cols, group_centers)
     ax3.axhline(1.0, color="black", linestyle="--", linewidth=1)
-    ax3.set_ylabel(r"$R_i=\dfrac{A_{\mathrm{c,corr}}(1-A_{\mathrm{c,corr}})}{A_{\mathrm{c,}i}(1-A_{\mathrm{c,}i})}$", fontsize=11)
+    ax3.set_ylabel(r"$R_i=\dfrac{A_{\mathrm{c,ref}}(1-A_{\mathrm{c,ref}})}{A_{\mathrm{c,}i}(1-A_{\mathrm{c,}i})}$", fontsize=11)
     ax3.text(-0.055, 1.19, format_panel_tag(2, "science"),
               transform=ax3.transAxes, fontsize=14, va="top", ha="right")
     add_ratio_legend(ax3, ratio_labels, bbox=(0.5, 1.27), fontsize=10)
@@ -571,10 +659,11 @@ def main():
     plt.close(fig)
     print("Saved:", OUTPUT_PATH)
     print("Saved:", CSV_PATH)
+    print("Saved:", MC_CSV_PATH)
     fig_ac, ax_ac = plt.subplots(figsize=(9.8, 3.6))
     draw_ratio_bars(ax_ac, df, AC_RATIO_COLS, group_centers)
     ax_ac.axhline(1.0, color="black", linestyle="--", linewidth=1)
-    ax_ac.set_ylabel(r"Corrected / original $A_c$", fontsize=11)
+    ax_ac.set_ylabel(r"Reference / original $A_c$", fontsize=11)
     add_ratio_legend(ax_ac, ratio_labels, bbox=(0.5, 1.18), fontsize=10)
     style_ocean_axis(ax_ac, group_centers)
     fig_ac.tight_layout()
