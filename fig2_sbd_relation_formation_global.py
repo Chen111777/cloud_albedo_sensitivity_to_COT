@@ -121,19 +121,22 @@ def draw_global(ax, data, curves):
     cot_fit = np.geomspace(MIN_COT, 76, 200)
 
     if 'analy_mu13' in curves:
+        # Analytical fits are dashed; black marks SZA=54.7°, gray marks SZA=0°.
         ax.plot(cot_fit, cot_to_albedo(cot_fit, 'analy', miu=3 ** (-0.5)),
-                color='k', ls='-', lw=1.8,
+                color='k', ls='--', lw=1.8,
                 label=r'Anal-54.7°: $k$=1.00')
     if 'visible_mu13' in curves:
-        fit_and_plot(ax, data, 'visible_mu13', r'SBD-54.7°', '0.5', edges,
+        # SBDART curves are solid and share the same SZA colour code
+        # (black: 54.7°, gray: 0°) with the analytical pair.
+        fit_and_plot(ax, data, 'visible_mu13', r'SBD-54.7°', 'k', edges,
                      linestyle='-')
     if 'analy' in curves:
         ax.plot(cot_fit, cot_to_albedo(cot_fit, 'analy', miu=1),
-                color='k', ls='--', lw=1.8,
+                color='0.5', ls='--', lw=1.8,
                 label=r'Anal-0°: $k$=1.00')
     if 'visible' in curves:
-        fit_and_plot(ax, data, 'visible', r'SBD-0°', COLORS['visible'],
-                     edges, linestyle='--')
+        fit_and_plot(ax, data, 'visible', r'SBD-0°', '0.5',
+                     edges, linestyle='-')
     if 'sza' in curves:
         fit_and_plot(ax, data, 'sza', r'Real SZA', COLORS['sza'], edges)
     if 'shortwave' in curves:
