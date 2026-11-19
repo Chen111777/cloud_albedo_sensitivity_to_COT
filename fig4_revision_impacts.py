@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """Combined figure of intrinsic forcing (INF) before and after revision.
-The area-weighted susceptibility correction applied to converted literature
-estimates uses the reference column ``ratio_547`` of the seasonal k table.
-The 60S-60N annual SW_TOA / SW_sur,clr ratio of 1.411 is applied to M17 only.
+Susceptibility corrections are based on area-weighted k*R values, with
+uncertainty propagated from the Fig. 3 bootstrap distributions.
 """
 from pathlib import Path
 import numpy as np
@@ -27,38 +26,82 @@ RATIO_CSV = Path(
     "/home/chenyiqi/251028_albedo_cot/project0904/processed_data/"
     "fig3_sbd_seasonal_3ratios_8oceans.csv"
 )
+MC_RATIO_CSV = Path(__file__).resolve().parent / "processed_data" / "fig3_sbd_seasonal_3ratios_8oceans_mc.csv"
 OUT_DIR = Path("./figs")
 OUT_DIR.mkdir(exist_ok=True, parents=True)
-OUT_FIG = OUT_DIR / "fig4_combined.png"
-BAR_DIR = OUT_DIR / "ocean_bars"
+OUT_FIG = OUT_DIR / "fig4_combined_0.png"
+BAR_DIR = OUT_DIR / "ocean_bars_0"
 # Shared, untruncated normal conversion factor: INF = F_INTRINSIC * IRFaci.
 # The supplied 0.3 is an absolute central-90% half-width, not a relative error
 # or a standard deviation. Values outside [0, 1] are allowed by this model.
-F_INTRINSIC = 0.705
-F_INTRINSIC_90_HALF_WIDTH = 0.295
+F_INTRINSIC = 1.0
+F_INTRINSIC_90_HALF_WIDTH = 0.59
 Z90 = 1.6448536269514722
 F_INTRINSIC_STD = F_INTRINSIC_90_HALF_WIDTH / Z90
-# Area-weighted susceptibility correction used for every converted study:
-# k_fit * ratio_547 from the seasonal k table. The additional 60S-60N annual
-# SW_TOA / SW_sur,clr ratio (1.411) is applied to M17 only.
-SUSCEPTIBILITY_MODE = "ratio_547"
+# The five k*R correction distributions are loaded from the Fig. 3 bootstrap
+# output. The additional SW_TOA / SW_sur,clr ratio (1.411) is applied to M17/T19.
 SW_TOA_OVER_SFC_CLR = 1.411
-def load_ratio_means(csv_path):
-    """Average seasons within each ocean, then area-weight the ocean means."""
-    columns = ["k_fit", "ratio_547", "ratio_0", "ratio_ebaf", "ratio_ssf", "ratio_038"]
-    data = pd.read_csv(csv_path, usecols=["Ocean"] + columns)
-    regional = data.groupby("Ocean", sort=False)[columns].mean()
+def load_correction_draws(mc_csv_path, n_draws=1_000_000, seed=20261114):
+    """Build area-weighted draws of k*R, multiplying region-season values first.
+
+    For each Monte Carlo realization, one bootstrap draw is selected jointly
+    for the five methods within each ocean-season. Seasons are averaged within
+    each ocean, and the resulting ocean means are area-weighted.
+    """
+    columns = [f"kratio_{name}" for name in
+               ("547", "0", "ebaf", "ssf", "038")]
+    mc = pd.read_csv(mc_csv_path)
+    required = {"Ocean", "Season", *columns}
+    missing = required.difference(mc.columns)
+    if missing:
+        raise ValueError(f"Fig. 3 Monte Carlo CSV is missing columns: {sorted(missing)}")
     areas = pd.read_csv(RESULT_CSV, usecols=["Ocean", "Area"]).set_index("Ocean")["Area"]
-    weights = areas.reindex(regional.index).to_numpy(float)
+    oceans_order = [o for o in areas.index if o in set(mc["Ocean"])]
+    weights = areas.reindex(oceans_order).to_numpy(float)
     if not np.all(np.isfinite(weights) & (weights > 0)):
         raise ValueError("Every ocean region must have a finite, positive area.")
+    rng = np.random.default_rng(seed)
+    ocean_draws = {o: {c: [] for c in columns} for o in oceans_order}
+    for ocean in oceans_order:
+        for season in ("MAM", "JJA", "SON", "DJF"):
+            subset = mc[(mc["Ocean"] == ocean) & (mc["Season"] == season)]
+            if subset.empty:
+                continue
+            values = subset[columns].to_numpy(float)
+            valid = np.isfinite(values).all(axis=1)
+            values = values[valid]
+            if not len(values):
+                continue
+            selected = rng.integers(0, len(values), size=n_draws)
+            sampled = values[selected, :]
+            for j, col in enumerate(columns):
+                ocean_draws[ocean][col].append(sampled[:, j])
     result = {}
-    for column in columns:
-        values = regional[column].to_numpy(float)
-        valid = np.isfinite(values)
-        if not valid.any():
-            raise ValueError(f"No finite regional values for {column}")
-        result[column] = float(np.average(values[valid], weights=weights[valid]))
+    for col in columns:
+        regional = []
+        regional_weights = []
+        for ocean in oceans_order:
+            season_arrays = ocean_draws[ocean][col]
+            if season_arrays:
+                regional.append(np.mean(np.vstack(season_arrays), axis=0))
+                regional_weights.append(float(areas.loc[ocean]))
+        if not regional:
+            raise ValueError(f"No valid k*R bootstrap draws for {col}")
+        regional = np.vstack(regional)
+        regional_weights = np.asarray(regional_weights, dtype=float)
+        result[col.replace("kratio_", "ratio_")] = np.average(
+            regional, axis=0, weights=regional_weights
+        )
+    print("\nArea-weighted correction coefficients (first k*R within each ocean-season):")
+    for name in ("547", "0", "ebaf", "ssf", "038"):
+        key = f"ratio_{name}"
+        values = result[key]
+        print(
+            f"  {key:12s}: mean={np.mean(values):.5f}, "
+            f"SD={np.std(values, ddof=1):.5f}, "
+            f"90% interval=[{np.quantile(values, .05):.5f}, "
+            f"{np.quantile(values, .95):.5f}]"
+        )
     return result
 # ============================================================
 # Fig. 4a map inputs
@@ -144,20 +187,9 @@ def print_map_summary(result, erf_co2):
     print(f"Global area-weighted mean of delta_INF/ERF_CO2: {ratio_awm:.4f}")
     # Ratio of the global area-weighted means as well as the per-ocean ratios.
     global_ratio = corrected_awm / ceres_awm
-    # Area-weighted mean of the per-ocean ratios (a different way of combining
-    # the regional ratios; both are printed for completeness).
-    ratio_of_regions_awm = sum(
-        (row["Corrected"] / row["CERES"]) * areas[row["Ocean"]]
-        for _, row in result.iterrows()
-    ) / total_area
     print(
         "Global area-weighted mean of INF_corrected / INF_original: "
         f"{global_ratio:.4f} ({(global_ratio - 1.0) * 100:+.2f}%)"
-    )
-    print(
-        "Global area-weighted mean of the per-ocean ratios "
-        f"INF_corrected / INF_original: {ratio_of_regions_awm:.4f} "
-        f"({(ratio_of_regions_awm - 1.0) * 100:+.2f}%)"
     )
     print("Per-ocean INF_corrected / INF_original:")
     for _, row in result.iterrows():
@@ -193,14 +225,14 @@ rows = pd.DataFrame([
     ("Chri17", -0.30, -0.70,  0.10, "intrinsic_fixed", None),
 ], columns=["study", "raw_mean", "raw_low", "raw_high", "kind", "correction_mode"])
 # ============================================================
-# Construct source intervals at the mean conversion factor first. Conversion
-# uncertainty is subsequently propagated once, jointly across converted studies.
+# Construct source intervals on the central INF-conversion scale. Conversion
+# uncertainty is subsequently propagated jointly across converted studies.
 # All reported AR6 ranges are treated as central 90% intervals (5th to 95th
 # percentiles), as requested. Endpoints are retained, not treated as 1-sigma.
 # ============================================================
-ratio_means = load_ratio_means(RATIO_CSV)
-print(ratio_means)
+correction_draws = load_correction_draws(MC_RATIO_CSV)
 records = []
+study_correction_draws = {}
 for row in rows.to_dict("records"):
     raw_mean = row["raw_mean"]
     raw_low, raw_high = row["raw_low"], row["raw_high"]
@@ -211,22 +243,23 @@ for row in rows.to_dict("records"):
     else:
         raise ValueError(f"Unknown row kind: {row['kind']}")
     correction_factor = 1.0
+    correction_samples = np.ones(1_000_000, dtype=float)
     if row["kind"] == "irf_to_intrinsic":
         # Use the albedo-ratio prescription assigned to each corrected study:
         # G17/H19/T19 -> ratio_ebaf; M17 -> ratio_547.
         # D20 is converted to INF but, like B13, receives no ratio correction.
-        # The additional SW_TOA / SW_sur,clr factor (1.411) applies to M17 only.
+        # The additional SW_TOA / SW_sur,clr factor (1.411) applies to M17 and T19.
         study_ratio = row["correction_mode"]
-        if study_ratio not in ratio_means:
+        draw_key = study_ratio.replace("ratio_", "ratio_")
+        if draw_key not in correction_draws:
             raise ValueError(
-                f"Missing susceptibility ratio {study_ratio!r} for {row['study']}"
+                f"Missing area-weighted k*R draws {draw_key!r} for {row['study']}"
             )
-        correction_factor = ratio_means["k_fit"] * ratio_means[study_ratio]
-        if row["study"] == "M17" or row["study"] == "T19":
-            correction_factor *= SW_TOA_OVER_SFC_CLR
-    if not (np.isfinite(inf_factor) and inf_factor > 0
-            and np.isfinite(correction_factor) and correction_factor > 0):
-        raise ValueError(f"Invalid fixed scaling factors for {row['study']}")
+        correction_samples = correction_draws[draw_key].copy()
+        if row["study"] in {"M17", "T19"}:
+            correction_samples *= SW_TOA_OVER_SFC_CLR
+        correction_factor = float(np.mean(correction_samples))
+    study_correction_draws[row["study"]] = correction_samples
     before_mean = raw_mean * inf_factor
     after_mean = before_mean * correction_factor
     before_low, before_high = raw_low * inf_factor, raw_high * inf_factor
@@ -245,15 +278,16 @@ for row in rows.to_dict("records"):
         "raw_high": raw_high,
         "inf_factor": inf_factor,
         "correction_factor": correction_factor,
+        "correction_factor_std": float(np.std(correction_samples, ddof=1)),
+        "correction_factor_p05": float(np.quantile(correction_samples, 0.05)),
+        "correction_factor_p95": float(np.quantile(correction_samples, 0.95)),
         "kind": row["kind"],
         # Mode actually applied (M17 for every converted study) and the mode
         # tabulated for that study as a reference.
-        "correction_mode": (SUSCEPTIBILITY_MODE
-                            if row["kind"] == "irf_to_intrinsic"
-                            else row["correction_mode"]),
+        "correction_mode": row["correction_mode"],
         "reported_correction_mode": row["correction_mode"],
         "correction_scale": (SW_TOA_OVER_SFC_CLR
-                             if row["kind"] == "irf_to_intrinsic" else 1.0),
+                             if row["study"] in {"M17", "T19"} else 1.0),
     })
 df = pd.DataFrame(records)
 # Impute absolute lower/upper error distances on the common baseline-INF scale,
@@ -281,27 +315,21 @@ df = (
       .reset_index(drop=True)
 )
 def propagate_f_and_mixture(data, n_draws=1_000_000, seed=20261029):
-    """Propagate the distributed INF conversion factor for each study.
-    Converted studies share one normally distributed factor draw per realization.
-    Source-study uncertainty is sampled independently; intrinsic-fixed studies
-    are not multiplied by the conversion factor. Per-study and pooled summaries
-    are calculated from the resulting distributions.
+    """Propagate INF conversion, source-study and k*R correction uncertainty.
+
+    Converted studies share one INF conversion-factor draw per realization.
+    Each corrected study uses the Monte Carlo distribution of its applicable
+    area-weighted k*R coefficient. Intrinsic-fixed studies are not converted.
     """
     data = data.copy()
     base_mean = data["before_mean"].to_numpy(float)
     base_low = data["before_low"].to_numpy(float)
     base_high = data["before_high"].to_numpy(float)
-    corrections = data["correction_factor"].to_numpy(float)
     converted = data["kind"].ne("intrinsic_fixed").to_numpy()
     if not (np.isfinite(base_mean).all() and np.isfinite(base_low).all()
             and np.isfinite(base_high).all()
-            and (base_low <= base_mean).all() and (base_mean <= base_high).all()
-            and np.isfinite(corrections).all() and (corrections > 0).all()):
+            and (base_low <= base_mean).all() and (base_mean <= base_high).all()):
         raise ValueError("Invalid forcing values, interval bounds or corrections.")
-    if (not np.isfinite(F_INTRINSIC) or F_INTRINSIC <= 0
-            or not np.isfinite(F_INTRINSIC_STD) or F_INTRINSIC_STD < 0
-            or n_draws < 1):
-        raise ValueError("Invalid normal conversion parameters or draw count.")
 
     source_sigma = (base_high - base_low) / (2.0 * Z90)
     if not np.isfinite(source_sigma).all() or (source_sigma < 0).any():
@@ -327,7 +355,11 @@ def propagate_f_and_mixture(data, n_draws=1_000_000, seed=20261029):
         else:
             before_samples = rng.normal(base_mean[j], source_sigma[j], size=n_draws)
 
-        after_samples = before_samples * corrections[j]
+        correction_samples = study_correction_draws[data.iloc[j]["study"]]
+        if len(correction_samples) != n_draws:
+            correction_indices = rng.integers(0, len(correction_samples), size=n_draws)
+            correction_samples = correction_samples[correction_indices]
+        after_samples = before_samples * correction_samples
         data.loc[data.index[j], "before_mean"] = float(np.mean(before_samples))
         data.loc[data.index[j], ["before_low", "before_high"]] = np.quantile(
             before_samples, [0.05, 0.95]
@@ -341,9 +373,11 @@ def propagate_f_and_mixture(data, n_draws=1_000_000, seed=20261029):
         mixture_before[selected] = before_samples[selected]
         mixture_after[selected] = after_samples[selected]
 
-    before = (float(data["before_mean"].mean()),
+    # The synthesis mean is the mean of the equal-weight mixture distribution,
+    # not a separately averaged set of point estimates.
+    before = (float(np.mean(mixture_before)),
               *map(float, np.quantile(mixture_before, [0.05, 0.95])))
-    after = (float(data["after_mean"].mean()),
+    after = (float(np.mean(mixture_after)),
              *map(float, np.quantile(mixture_after, [0.05, 0.95])))
     return data, before, after
 
@@ -357,9 +391,10 @@ print(f"Mean before: {before_mean_all:.3f} [{before_low_all:.3f}, {before_high_a
 print(f"Mean after : {after_mean_all:.3f} [{after_low_all:.3f}, {after_high_all:.3f}] W m-2")
 print(f"F_INTRINSIC: normal mean={F_INTRINSIC:.3f}, SD={F_INTRINSIC_STD:.6f}, "
       f"central-90% half-width={F_INTRINSIC_90_HALF_WIDTH:.3f}.")
-print("Per-study before/after values and pooled 5th-95th percentiles include "
-      "the normally distributed INF conversion factor for converted studies; "
-      "susceptibility corrections are fixed (1,000,000 draws; seed=20261029).")
+print("Per-study and pooled distributions include source-study uncertainty, "
+      "the shared normally distributed INF conversion factor, and the "
+      "Monte Carlo uncertainty in area-weighted k*R corrections "
+      "(1,000,000 draws; seed=20261029).")
 # ============================================================
 # Combined figure: Fig. 4a (map) above Fig. 4b (swapped dumbbell plot)
 # ============================================================
@@ -386,7 +421,8 @@ def plot_single_ocean_bar(ocean, ceres_ac, corrected):
     ax.set_xlabel(r"INF (W m$^{-2}$)", fontsize=10.5)
     ax.set_title(ocean, fontsize=13, fontweight="bold", loc="right")
     ax.axvline(0, color="black", linewidth=0.8)
-    ax.set_xlim(-1.6, 0)
+    ax.set_xlim(-2.3, 0)
+    # ax.set_xlim(-1.6, 0)
     ax.spines["top"].set_visible(False)
     ax.spines["left"].set_visible(False)
     ax.spines["right"].set_visible(True)
